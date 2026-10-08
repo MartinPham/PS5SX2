@@ -1071,10 +1071,12 @@ void OrbisVkPresentBlend(GSTexture* tex, const GSVector4& sRect, const GSVector4
 extern bool g_orbis_fg_wanted;
 extern bool g_orbis_fg_engaged; // vk-285-133: generated frames have room (the repeats of the game's last frame present nothing then)
 u32 OrbisVkFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader, float shader_time,
-	Filter filter, u32 vsyncs, double ps2_hz, float speed, bool nominal);
+	Filter filter, u32 vsyncs, u32 already, double ps2_hz, float speed, bool nominal);
 void OrbisVkFrameGenDraw();
-// vk-285-133: the PS2 vsyncs since the game's last new frame (what frame generation's pacing counts in), GS thread only.
+// vk-285-133: the PS2 vsyncs since the game's last new frame (what frame generation's pacing counts in), and the presents made
+// since then besides the generated ones (the game's last frame, a repeat presented after it), GS thread only.
 static u32 s_orbis_fg_vsyncs = 0;
+static u32 s_orbis_fg_presents = 0;
 
 // Test build 1: the TESTING watermark in the middle of the game's picture, faint (its opacity is in
 // the image), sized for the display's height. The texture is made once per GS device.
@@ -2790,16 +2792,20 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		{
 			const float fg_time = static_cast<float>(
 				Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - m_shader_time_start));
-			// vk-285-133: the pacing's inputs: the vsyncs this frame took, the PS2's rate, the speed, and the limiter (turbo, slow
-			// motion and the fast boot get no generated frames).
+			// vk-285-133: the pacing's inputs: the vsyncs this frame took, the presents already made in them, the PS2's rate, the
+			// speed (of the target: a NominalScalar under 100% isn't a slowdown), and the limiter (turbo, slow motion and the fast
+			// boot get no generated frames; nor does a video capture, which presents every repeat).
 			const u32 fg_vsyncs = s_orbis_fg_vsyncs;
+			const u32 fg_already = s_orbis_fg_presents;
 			s_orbis_fg_vsyncs = 0;
+			s_orbis_fg_presents = 0;
 			const float fg_target = VMManager::GetTargetSpeed();
-			const bool fg_nominal =
-				VMManager::GetLimiterMode() == LimiterModeType::Nominal && fg_target > 0.5f && fg_target < 1.05f;
+			const bool fg_nominal = VMManager::GetLimiterMode() == LimiterModeType::Nominal && fg_target > 0.5f && fg_target < 1.05f &&
+			                        !GSCapture::IsCapturingVideo();
+			const float fg_speed = fg_target > 0.0f ? PerformanceMetrics::GetSpeed() / fg_target : PerformanceMetrics::GetSpeed();
 			const u32 generated_presents = OrbisVkFrameGenRecord(current, src_uv, draw_rect, s_tv_shader_indices[GSConfig.TVShader],
-				fg_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off), fg_vsyncs, GetVerticalFrequency(),
-				PerformanceMetrics::GetSpeed(), fg_nominal);
+				fg_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off), fg_vsyncs, fg_already, GetVerticalFrequency(),
+				fg_speed, fg_nominal);
 
 			for (u32 i = 0; i < generated_presents; i++)
 			{
@@ -2839,6 +2845,9 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 			ORBIS_VS_MARK(ORBIS_VS_OSD);
 			EndPresentFrame();
 			ORBIS_VS_MARK(ORBIS_VS_END);
+#ifdef ORBIS_VULKAN
+			s_orbis_fg_presents++; // vk-285-133: a refresh of this interval used (frame generation's budget)
+#endif
 
 			const float gpu_time = g_gs_device->GetAndResetAccumulatedGPUTime();
 			GPUPipelineStatistics gpu_stats = g_gs_device->GetAndResetAccumulatedGPUPipelineStatistics();

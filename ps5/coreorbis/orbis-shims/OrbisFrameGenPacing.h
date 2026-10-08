@@ -10,20 +10,23 @@
 // Here the interval is the number of PS2 vsyncs between two new frames of the game, which the presents can't change, and a
 // frame's presents never exceed the display refreshes the PS2 gives it:
 //     refreshes = vsyncs x display Hz / PS2 Hz
-// The game's frame is one present. Frames are generated only when the game's frames have two refreshes or more (a 60 fps game
-// on a 120 Hz display, a 30 fps one at 60 Hz), and the generated frame is presented for about half of them (once at 2, twice
-// at 4, three times at 6); the game's frame stays up until the next one. A 60 fps game at 60 Hz gets none. While frames are
-// generated, the vsyncs that only repeat the game's last frame present nothing (GSRenderer.cpp): the generated frame used
-// their refresh.
+// The game's frame is one present. Frames are generated only when the game's frames have two refreshes or more (the median of
+// the last 8 intervals: a 60 fps game on a 120 Hz display, a 30 fps one at 60 Hz), and the generated frame is presented for
+// about half of them (once at 2, twice at 4, three times at 6); the game's frame stays up until the next one. A 60 fps game at
+// 60 Hz gets none. A frame never gets more presents than its own interval had refreshes, less the presents already made in
+// it (the game's last frame, a repeat GSRenderer.cpp still presented). While frames are generated, the vsyncs that only
+// repeat the game's last frame present nothing (GSRenderer.cpp): the generated frame used their refresh. After a load or a
+// pause (more than 8 vsyncs without a new frame) and at the start, 8 frames come before any is generated.
 //
-// The safety net: when the game runs below 95% for 3 seconds while frames are generated, none are for 10 s. If the game is
-// back at full speed in that pause, they were costing it, and the next pause is twice as long (up to 160 s). If it is as slow
-// without them, the game is slow by itself there: frames are generated again, and for a minute that speed (less 3 points)
-// is the floor. Nothing is generated while the frame limiter isn't at normal speed (turbo, slow motion, the fast boot).
-// Header-only, so a PC test runs it (ps5/coreorbis/tests/fgpacing).
+// The safety net: when the game runs below 95% of its target speed for 3 seconds while frames are generated, none are for
+// 10 s. If the game is back at full speed (97%+) in that pause, they were costing it: the next pause is twice as long (up to
+// 160 s; back to 10 s after 5 minutes without one). If it is as slow without them, the game is slow by itself there: frames
+// are generated again, and for a minute that speed (less 3 points) is the floor. Nothing is generated while the frame
+// limiter isn't at normal speed (turbo, slow motion, the fast boot). Header-only, so a PC test runs it (tests/fgpacing).
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 
 namespace orbis_fg
@@ -35,35 +38,47 @@ namespace orbis_fg
 		uint32_t presents = 0; // presents of the generated frame before the game's, for this frame (0: none this time)
 	};
 
-	// What changed, for the log.
+	// Where the pacing is, for the log.
+	enum class State
+	{
+		Warming,    // the start, or a load or a pause: 8 frames first
+		NoRoom,     // the game's frames have fewer than two refreshes each
+		NotNominal, // the frame limiter isn't at normal speed
+		Paused,     // the safety net's pause
+		Generating,
+	};
+
+	// The safety net's news, for the log.
 	enum class Event
 	{
 		None,
-		Engaged,         // frames are generated: the game's frames have room for another
-		Disengaged,      // no room any more, or the limiter left normal speed
 		Paused,          // the game slowed while frames were generated: none for PauseSeconds()
-		ResumedCostly,   // the game was at full speed without them: generated again, the next pause longer
-		ResumedSlowGame, // it was as slow without them: generated again, with a lower floor for a minute
+		ResumedCostly,   // the game was at full speed without them: the next pause is longer
+		ResumedSlowGame, // it was as slow without them: a lower floor for a minute
 	};
 
 	class Pacing
 	{
 	public:
 		static constexpr uint32_t kGapVsyncs = 8;      // a longer wait between two frames: a load, a pause, a still picture
+		static constexpr uint32_t kWindow = 8;         // the intervals the median is taken over; as many frames after a gap
 		static constexpr double kEngage = 1.97;        // two refreshes a frame, less rounding (an HD mode's 60 Hz on 119.88: 1.998)
-		static constexpr double kDisengage = 1.6;      // ...kept down to here (a 30 fps game's odd short frame), each frame still capped
-		static constexpr double kSlowSpeed = 95.0;     // percent
+		static constexpr double kDisengage = 1.6;      // ...kept down to here, each frame still capped by its own interval
+		static constexpr double kSlowSpeed = 95.0;     // percent of the target speed
+		static constexpr double kFullSpeed = 97.0;
 		static constexpr int kSlowSeconds = 3;
 		static constexpr double kFirstPause = 10.0;    // seconds
 		static constexpr double kMaxPause = 160.0;
+		static constexpr double kPauseForget = 300.0;  // a pause this long ago no longer lengthens the next one
 		static constexpr double kSettle = 2.0;         // a pause's first seconds aren't the game's speed without them yet
 		static constexpr double kFloorSeconds = 60.0;
 		static constexpr double kCostly = 3.0;         // points of speed a pause has to win back to blame the generated frames
-		static constexpr double kMeanWeight = 0.1;     // a frame's weight in the mean
 
-		// One new frame of the game: `vsyncs` since the last new frame (1 at 60 fps, 2 at 30), the PS2's and the display's rates
-		// in Hz, `now` in seconds (any steady clock), the emulation's speed in percent, and whether the limiter is at normal speed.
-		Decision Frame(uint32_t vsyncs, double ps2_hz, double display_hz, double now, double speed, bool nominal)
+		// One new frame of the game: `vsyncs` since the last new frame (1 at 60 fps, 2 at 30), `already` the presents made since
+		// the last one was given here (its own game frame and any repeat presented after it), the PS2's and the display's rates
+		// in Hz, `now` in seconds (any steady clock), the emulation's speed in percent of its target, and whether the limiter is
+		// at normal speed.
+		Decision Frame(uint32_t vsyncs, uint32_t already, double ps2_hz, double display_hz, double now, double speed, bool nominal)
 		{
 			Decision d;
 			if (vsyncs == 0)
@@ -74,18 +89,21 @@ namespace orbis_fg
 				display_hz = 59.94;
 			const double ratio = display_hz / ps2_hz;
 
-			// A long wait: the mean starts again, and so does the interpolator.
+			// A long wait: the window starts again, and so does the interpolator.
 			const bool gap = vsyncs > kGapVsyncs;
 			if (gap)
 			{
-				m_mean = 0.0;
+				m_count = 0;
 				m_reset = true;
 			}
 			else
 			{
-				m_mean = m_mean > 0.0 ? m_mean * (1.0 - kMeanWeight) + vsyncs * kMeanWeight : vsyncs;
+				m_window[m_next] = vsyncs;
+				m_next = (m_next + 1) % kWindow;
+				m_count = m_count < kWindow ? m_count + 1 : kWindow;
 			}
-			m_refreshes = m_mean * ratio;
+			m_median = Median();
+			m_refreshes = m_median * ratio;
 			const double now_refreshes = vsyncs * ratio;
 
 			// The generated frame's presents: about half the refreshes a frame has, kept from flickering between two counts.
@@ -97,36 +115,20 @@ namespace orbis_fg
 
 			Second(now, speed);
 
-			const bool room = !gap && m_mean > 0.0 && m_refreshes >= (m_room ? kDisengage : kEngage);
-			if (room != m_room)
-			{
-				m_room = room;
-				if (!Paused() && nominal)
-					Raise(room ? Event::Engaged : Event::Disengaged);
-			}
-			if (nominal != m_nominal)
-			{
-				m_nominal = nominal;
-				if (!Paused() && m_room)
-					Raise(nominal ? Event::Engaged : Event::Disengaged);
-			}
-
-			d.engaged = m_room && nominal && !Paused();
+			const bool warm = m_count >= kWindow;
+			m_room = warm && m_refreshes >= (m_room ? kDisengage : kEngage);
+			m_state = !warm ? State::Warming : !m_room ? State::NoRoom : !nominal ? State::NotNominal : Paused() ? State::Paused : State::Generating;
+			d.engaged = m_state == State::Generating;
 			if (!d.engaged)
 			{
 				m_reset = true; // the frames skipped meanwhile weren't given to the interpolator
-				m_engaged = false;
 				return d;
 			}
-			if (!m_engaged)
-			{
-				m_engaged = true;
-				m_reset = true;
-			}
 
-			// This frame's presents: never more than the refreshes its own interval had, less the game's frame.
+			// This frame's presents: never more than the refreshes its own interval had, less the presents already made in it.
 			const uint32_t fit = static_cast<uint32_t>(now_refreshes + 0.03);
-			d.presents = fit > 1 ? (m_repeats < fit - 1 ? m_repeats : fit - 1) : 0;
+			const uint32_t left = fit > already ? fit - already : 0;
+			d.presents = std::min(m_repeats, left);
 			d.reset = m_reset;
 			m_reset = false;
 			if (d.presents > 0)
@@ -141,22 +143,29 @@ namespace orbis_fg
 			return e;
 		}
 
-		double MeanVsyncs() const { return m_mean; }
+		State GetState() const { return m_state; }
+		double MedianVsyncs() const { return m_median; }
 		double Refreshes() const { return m_refreshes; }
 		uint32_t Repeats() const { return m_repeats; }
+		uint32_t WarmFrames() const { return m_count; }
 		bool Paused() const { return m_paused_until > 0.0; }
 		double PauseSeconds() const { return m_pause_length; }
 		double SlowSpeed() const { return m_fg_speed; }     // the speed that started the last pause
 		double PauseFloor() const { return m_pause_floor; } // the floor it fell below
 		double NoFgSpeed() const { return m_nofg_speed; }   // the speed during the last pause
+		double NextPause() const { return m_next_pause; }
 		double Floor(double now) const { return now < m_floor_until ? m_floor : kSlowSpeed; }
 
 	private:
-		// A room change doesn't hide a pause or a resume not yet logged.
-		void Raise(Event e)
+		double Median() const
 		{
-			if (m_event == Event::None || m_event == Event::Engaged || m_event == Event::Disengaged)
-				m_event = e;
+			if (m_count == 0)
+				return 0.0;
+			uint32_t v[kWindow];
+			for (uint32_t i = 0; i < m_count; i++)
+				v[i] = m_window[(m_next + kWindow - 1 - i) % kWindow];
+			std::sort(v, v + m_count);
+			return (m_count & 1) ? v[m_count / 2] : (v[m_count / 2 - 1] + v[m_count / 2]) / 2.0;
 		}
 
 		// Once a second: the speed against the floor while frames are generated, and the pauses.
@@ -184,19 +193,20 @@ namespace orbis_fg
 				if (now < m_paused_until)
 					return;
 				m_paused_until = 0.0;
+				m_last_pause_end = now;
 				m_slow = 0;
 				m_slow_sum = 0.0;
 				m_nofg_speed = m_nofg_n > 0 ? m_nofg_sum / m_nofg_n : speed;
 				m_nofg_sum = 0.0;
 				m_nofg_n = 0;
-				if (m_nofg_speed >= m_fg_speed + kCostly)
+				if (m_nofg_speed >= kFullSpeed && m_nofg_speed >= m_fg_speed + kCostly)
 				{
-					m_next_pause = m_next_pause * 2.0 < kMaxPause ? m_next_pause * 2.0 : kMaxPause;
+					m_next_pause = std::min(m_next_pause * 2.0, kMaxPause);
 					m_event = Event::ResumedCostly;
 				}
 				else
 				{
-					m_floor = m_nofg_speed - kCostly < kSlowSpeed ? m_nofg_speed - kCostly : kSlowSpeed;
+					m_floor = std::min(m_nofg_speed - kCostly, kSlowSpeed);
 					m_floor_until = now + kFloorSeconds;
 					m_next_pause = kFirstPause;
 					m_event = Event::ResumedSlowGame;
@@ -205,6 +215,8 @@ namespace orbis_fg
 				return;
 			}
 
+			if (m_last_pause_end > 0.0 && now - m_last_pause_end >= kPauseForget)
+				m_next_pause = kFirstPause;
 			if (generated && speed < Floor(now))
 			{
 				m_slow++;
@@ -228,14 +240,15 @@ namespace orbis_fg
 			}
 		}
 
-		double m_mean = 0.0;
+		uint32_t m_window[kWindow] = {};
+		uint32_t m_next = 0, m_count = 0;
+		double m_median = 0.0;
 		double m_refreshes = 0.0;
 		uint32_t m_repeats = 1;
 		bool m_room = false;
-		bool m_nominal = true;
-		bool m_engaged = false;
 		bool m_reset = true;
 		bool m_generated_this_second = false;
+		State m_state = State::Warming;
 		Event m_event = Event::None;
 
 		bool m_second_started = false;
@@ -246,6 +259,7 @@ namespace orbis_fg
 		double m_pause_floor = kSlowSpeed;
 		double m_pause_start = 0.0;
 		double m_paused_until = 0.0;
+		double m_last_pause_end = 0.0;
 		double m_pause_length = kFirstPause;
 		double m_next_pause = kFirstPause;
 		double m_nofg_sum = 0.0;

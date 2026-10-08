@@ -2173,19 +2173,21 @@ static void orbis_set_aside_shader_caches()
 // vk-285-133 (AI-assisted): the title's param.json for ps5vk's 120 Hz mode (frame generation). The driver offers the 119.88 Hz
 // mode only when the title's param.json declares high frame rates (attribute3 0x80040), and it read /app0/sce_sys/param.json,
 // which after the jailbreak doesn't lead to our folder: vk-285-131 on the console never offered the mode, and the TV stayed at
-// 60 Hz. PS5VK_PARAM_JSON names our own folder's copy instead (the first of these that opens), and what it declares is logged
-// here, since the driver's own lines go to stderr.log.
+// 60 Hz. PS5VK_PARAM_JSON names the first of these that opens instead: the running app's own folder as the sandbox mounts it
+// (what the system sees), /app0, then the install folder. What it declares is logged here, since the driver's own lines go to
+// stderr.log.
 static void orbis_vk_param_json()
 {
-  static const char* const paths[] = {"/data/homebrew/PPSA99203/sce_sys/param.json", "/app0/sce_sys/param.json",
-                                      "/mnt/sandbox/PPSA99203_000/app0/sce_sys/param.json"};
+  static const char* const paths[] = {"/mnt/sandbox/PPSA99203_000/app0/sce_sys/param.json", "/app0/sce_sys/param.json",
+                                      "/data/homebrew/PPSA99203/sce_sys/param.json"};
   std::string tried;
   for (const char* path : paths)
   {
     FILE* const file = fopen(path, "rb");
     if (!file)
     {
-      tried += std::string(tried.empty() ? "" : ", ") + path + " (errno " + std::to_string(errno) + ")";
+      const int error = errno;
+      tried += std::string(tried.empty() ? "" : ", ") + path + " (errno " + std::to_string(error) + ")";
       continue;
     }
     static char text[16384];
