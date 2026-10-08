@@ -110,6 +110,8 @@ def main():
         groups[(w['game'], w['thread']) if args.by_game else (w['file'], w['thread'])].append(w)
     for key, ws in sorted(groups.items(), key=lambda kv: -sum(w['n'] for w in kv[1])):
         n = sum(w['n'] for w in ws)
+        if n == 0:  # 2026-10-08: a window that logged no samples (none to name)
+            continue
         fn = collections.Counter()
         callers = collections.Counter()
         areas = collections.Counter()
