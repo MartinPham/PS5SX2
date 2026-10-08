@@ -85,14 +85,29 @@ bool App::Init(Renderer* renderer, const Fonts* fonts, std::vector<GameInfo> gam
 	m_games = std::move(games);
 	m_slots.assign(m_games.size(), Slot());
 	m_selected = m_games.empty() ? 0 : std::max(0, std::min(cfg.preselect, static_cast<int>(m_games.size()) - 1));
+	// vk-285-137: the games hidden from the shelf wait off it (ApplyHidden); the preselected one may be one of them.
+	m_index.resize(m_games.size());
+	for (size_t i = 0; i < m_index.size(); i++)
+		m_index[i] = static_cast<int>(i);
+	m_shelved.clear();
+	m_show_hidden = !cfg.options.gs_ini.empty() && ShowHiddenGames(cfg.options.gs_ini);
+	if (!m_games.empty())
+	{
+		const size_t all = m_games.size();
+		const size_t hidden = static_cast<size_t>(std::count_if(m_games.begin(), m_games.end(), [](const GameInfo& g) { return g.hidden; }));
+		ApplyHidden(m_selected);
+		if (hidden > 0)
+			std::printf("[frontend] %zu of %zu games hidden from the shelf%s\n", hidden, all,
+				m_show_hidden ? " (shown, dimmed: Show hidden games is on)" : "");
+	}
 	m_scroll = static_cast<float>(m_selected);
 	m_atlas = m_renderer->CreateTexture(static_cast<uint32_t>(fonts->AtlasWidth()), static_cast<uint32_t>(fonts->AtlasHeight()),
 		VK_FORMAT_R8_UNORM, fonts->AtlasPixels().data());
 	if (!m_atlas)
 		return false;
 	m_renderer->SetAtlas(m_atlas);
-	if (m_covers)
-		m_covers->SetSelected(m_selected);
+	if (m_covers && !m_games.empty())
+		m_covers->SetSelected(m_index[static_cast<size_t>(m_selected)]);
 	// vk-285-134: main-boot.cpp looked for the BIOS just before the shelf; what it found is shown until a pick looks again.
 	m_bios_problem = m_cfg.bios_problem ? m_cfg.bios_problem() : std::string();
 	m_bios_missing = !m_bios_problem.empty();
@@ -153,6 +168,9 @@ void App::Shutdown()
 		m_cfg.game_achievements.cancel();
 	ClearAchievementBadges();
 	m_account.Close();
+	for (Shelved& h : m_shelved) // vk-285-137
+		m_slots.push_back(h.slot);
+	m_shelved.clear();
 	for (Slot& s : m_slots)
 	{
 		m_renderer->FreeTextureSet(s.set);
@@ -177,7 +195,63 @@ bool App::Step(int dir)
 	m_selected = next;
 	m_select_time = m_time;
 	if (m_covers)
-		m_covers->SetSelected(m_selected);
+		m_covers->SetSelected(m_index[static_cast<size_t>(m_selected)]);
+	return true;
+}
+
+int App::PositionOf(int index) const
+{
+	const auto it = std::lower_bound(m_index.begin(), m_index.end(), index); // m_index keeps Init's order
+	return it != m_index.end() && *it == index ? static_cast<int>(it - m_index.begin()) : -1;
+}
+
+bool App::ApplyHidden(int keep)
+{
+	struct Entry
+	{
+		GameInfo game;
+		Slot slot;
+		int index;
+	};
+	std::vector<Entry> all;
+	all.reserve(m_games.size() + m_shelved.size());
+	for (size_t i = 0; i < m_games.size(); i++)
+		all.push_back({std::move(m_games[i]), m_slots[i], m_index[i]});
+	for (Shelved& h : m_shelved)
+		all.push_back({std::move(h.game), h.slot, h.index});
+	std::sort(all.begin(), all.end(), [](const Entry& a, const Entry& b) { return a.index < b.index; });
+	const std::vector<int> was = m_index;
+	m_games.clear();
+	m_slots.clear();
+	m_index.clear();
+	m_shelved.clear();
+	int at = -1, after = -1, before = -1;
+	for (Entry& e : all)
+	{
+		if (e.game.hidden && !m_show_hidden)
+		{
+			m_shelved.push_back({std::move(e.game), e.slot, e.index});
+			continue;
+		}
+		const int pos = static_cast<int>(m_games.size());
+		if (e.index == keep)
+			at = pos;
+		else if (e.index > keep && after < 0)
+			after = pos;
+		else if (e.index < keep)
+			before = pos;
+		m_games.push_back(std::move(e.game));
+		m_slots.push_back(e.slot);
+		m_index.push_back(e.index);
+	}
+	m_selected = at >= 0 ? at : after >= 0 ? after : before >= 0 ? before : 0;
+	if (m_index == was)
+		return false;
+	m_scroll = static_cast<float>(m_selected);
+	m_scroll_vel = 0;
+	m_select_time = m_time;
+	if (m_covers && !m_games.empty())
+		m_covers->SetSelected(m_index[static_cast<size_t>(m_selected)]);
 	return true;
 }
 
@@ -195,9 +269,25 @@ void App::PollCovers()
 	int budget = 4; // textures a frame
 	while (budget-- > 0 && m_covers->Poll(img))
 	{
-		if (img.game < 0 || img.game >= static_cast<int>(m_slots.size()))
+		// vk-285-137: img.game is an index in Init's list; the game may be off the shelf (its slot keeps the covers).
+		Slot* slot = nullptr;
+		const GameInfo* game = nullptr;
+		if (const int pos = PositionOf(img.game); pos >= 0)
+		{
+			slot = &m_slots[static_cast<size_t>(pos)];
+			game = &m_games[static_cast<size_t>(pos)];
+		}
+		else
+			for (Shelved& h : m_shelved)
+				if (h.index == img.game)
+				{
+					slot = &h.slot;
+					game = &h.game;
+					break;
+				}
+		if (!slot)
 			continue;
-		Slot& s = m_slots[static_cast<size_t>(img.game)];
+		Slot& s = *slot;
 		Texture* t = m_renderer->CreateTexture(static_cast<uint32_t>(img.width), static_cast<uint32_t>(img.height),
 			VK_FORMAT_R8G8B8A8_UNORM, img.rgba.data());
 		if (!t)
@@ -215,8 +305,7 @@ void App::PollCovers()
 				s.glow[2] = img.glow[2];
 				s.has_glow = true;
 			}
-			std::printf("[frontend] cover for %s (%s, %dx%d)\n", m_games[static_cast<size_t>(img.game)].title.c_str(),
-				img.source, img.width, img.height);
+			std::printf("[frontend] cover for %s (%s, %dx%d)\n", game->title.c_str(), img.source, img.width, img.height);
 		}
 		s.dirty = true;
 	}
@@ -499,6 +588,8 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		const float d = static_cast<float>(i) - m_scroll;
 		BoxDraw b;
 		Pose(d, t, b.model, b.brightness);
+		if (m_games[static_cast<size_t>(i)].hidden) // vk-285-137: shown while Show hidden games is on, dimmed
+			b.brightness *= 0.4f;
 		b.set = s.set;
 		b.cover_mix = s.cover_mix;
 		b.selected = std::max(0.0f, 1.0f - std::fabs(d) * 2.0f);
@@ -636,6 +727,8 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		add(SizeText(g.bytes));
 		if (!g.damaged.empty())
 			add("can't be read"); // vk-285-134
+		if (g.hidden)
+			add("hidden"); // vk-285-137
 		const float info_px = 44.0f * k, badge_px = 36.0f * k;
 		const float pad = 20.0f * k, gap = 16.0f * k;
 		float row_w = m_fonts->Measure(info.c_str(), info_px);
@@ -655,8 +748,15 @@ void App::Build(FrameDesc& f, const std::string& clock)
 	}
 	else
 		m_fonts->AddText(ui, Tr(Str::NoGames), W * 0.5f, H * 0.5f, 64.0f * k, white, 0.4f, Fonts::Center);
+	// vk-285-137: a note (a game hidden, hidden games shown or not), in the same place, unless a refusal came after it.
+	if (!m_note_text.empty() && m_time - m_note_time < 7.0 && m_note_time >= m_refused_time)
+	{
+		const float a = static_cast<float>(std::min(1.0, (7.0 - (m_time - m_note_time)) / 0.5));
+		m_fonts->AddText(ui, Fit(*m_fonts, m_note_text, 36.0f * k, W * 0.86f).c_str(), W * 0.5f, H * 0.775f, 36.0f * k,
+			Rgba(0.82f, 0.88f, 1.0f, a), 0.3f, Fonts::Center);
+	}
 	// vk-285-134: a pick refused for its image, for six seconds, just above the title.
-	if (!m_refused_text.empty() && m_time - m_refused_time < 6.0)
+	else if (!m_refused_text.empty() && m_time - m_refused_time < 6.0)
 	{
 		const float a = static_cast<float>(std::min(1.0, (6.0 - (m_time - m_refused_time)) / 0.5));
 		m_fonts->AddText(ui, Fit(*m_fonts, m_refused_text, 36.0f * k, W * 0.8f).c_str(), W * 0.5f, H * 0.775f, 36.0f * k,
@@ -963,9 +1063,14 @@ void App::OpenSheet(bool global)
 	m_picker.open = false;
 	OptionsPaths paths = m_cfg.options;
 	if (g && IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images
+	{
 		for (const GameInfo& other : m_games)
 			if (!IsElfName(other.file.c_str()))
 				paths.disc_images.emplace_back(other.file, other.title);
+		for (const Shelved& h : m_shelved) // vk-285-137: hidden ones too
+			if (!IsElfName(h.game.file.c_str()))
+				paths.disc_images.emplace_back(h.game.file, h.game.title);
+	}
 	m_sheet.Open(paths, g);
 	m_sheet_saved_at_open = 0;
 	if (!m_sheet_open)
@@ -1008,13 +1113,45 @@ void App::SheetTab(int tab)
 
 void App::RefreshBadges()
 {
-	if (!m_cfg.refresh_game || m_games.empty())
+	if (m_cfg.refresh_game && !m_games.empty())
+	{
+		if (m_sheet_global)
+			for (GameInfo& g : m_games)
+				m_cfg.refresh_game(g);
+		else
+			m_cfg.refresh_game(m_games[static_cast<size_t>(m_selected)]);
+	}
+	// vk-285-137: a game hidden on its sheet leaves the shelf now; Show hidden games (the sheet for all games) brings the hidden
+	// ones back, dimmed, or takes them off again.
+	const bool show = !m_cfg.options.gs_ini.empty() && ShowHiddenGames(m_cfg.options.gs_ini);
+	const bool show_changed = show != m_show_hidden;
+	m_show_hidden = show;
+	const bool hid = !m_sheet_global && !m_games.empty() && m_games[static_cast<size_t>(m_selected)].hidden && !show;
+	const std::string title = m_games.empty() ? std::string() : m_games[static_cast<size_t>(m_selected)].title;
+	const std::string file = m_games.empty() ? std::string() : m_games[static_cast<size_t>(m_selected)].file;
+	const int keep = !m_games.empty() ? m_index[static_cast<size_t>(m_selected)] : m_shelved.empty() ? 0 : m_shelved.front().index;
+	const size_t shown_before = m_games.size();
+	if (!ApplyHidden(keep) && !show_changed)
 		return;
-	if (m_sheet_global)
-		for (GameInfo& g : m_games)
-			m_cfg.refresh_game(g);
+	const size_t hidden_count = m_shelved.size() + static_cast<size_t>(std::count_if(m_games.begin(), m_games.end(),
+		[](const GameInfo& g) { return g.hidden; }));
+	if (hid)
+	{
+		m_note_text = title + " is hidden from the shelf. Show hidden games, on the sheet for all games (Square, then R1), brings it back.";
+		std::printf("[frontend] hidden from the shelf: %s (%zu hidden)\n", file.c_str(), hidden_count);
+	}
+	else if (show_changed)
+	{
+		m_note_text = show ? std::to_string(hidden_count) + (hidden_count == 1 ? " hidden game is" : " hidden games are") +
+		                         " back on the shelf, dimmed. To keep one there, turn Hide from the shelf off on its sheet."
+		                   : std::to_string(hidden_count) + (hidden_count == 1 ? " hidden game is" : " hidden games are") + " off the shelf again.";
+		std::printf("[frontend] hidden games %s (%zu; the shelf had %zu, now %zu)\n", show ? "shown, dimmed" : "off the shelf", hidden_count,
+			shown_before, m_games.size());
+	}
 	else
-		m_cfg.refresh_game(m_games[static_cast<size_t>(m_selected)]);
+		return;
+	m_note_time = m_time;
+	std::fflush(stdout);
 }
 
 void App::CloseSheet()

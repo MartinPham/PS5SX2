@@ -48,6 +48,7 @@ struct OptionGroup
 	std::vector<OptionDef> items;
 	int tab = kTabSettings;
 	bool game_only = false; // 2026-10-08: on a game's sheet only, not the one for all games (the page's "game: true")
+	bool global_only = false; // vk-285-137: on the sheet for all games only (the page's "global: true")
 };
 
 // 2026-10-08: the key that turns PCSX2's manual hardware fixes on (ManualUserHacks) for the rows with manual_fix.

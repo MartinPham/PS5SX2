@@ -322,6 +322,21 @@ std::string JoinFolderList(const std::vector<std::string>& items)
 const std::vector<OptionGroup>& OptionGroups()
 {
 	static const std::vector<OptionGroup> groups = {
+		// vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): a game off the shelf (its own file
+		// only), and the switch for all games that puts hidden games back on it, dimmed, so their sheets can turn it off again.
+		// First, so neither is far down the sheet (the Folders rows come before them on the sheet for all games).
+		{"Shelf",
+			{
+				Toggle("PS5SX2/HideGame", "Hide from the shelf", "false", "Hidden %",
+					"Takes this game off the shelf when the sheet closes. Show hidden games, on the sheet for all games (R1), puts hidden games back on the shelf, dimmed, to turn this off again."),
+			},
+			kTabSettings, true},
+		{"Shelf",
+			{
+				Toggle("PS5SX2/ShowHiddenGames", "Show hidden games", "false", "Hidden games %",
+					"Puts the games hidden from the shelf back on it, dimmed, so you can open one's sheet and turn Hide from the shelf off."),
+			},
+			kTabSettings, false, true},
 		{"Display",
 			{
 				Seg("upscale_multiplier", "Resolution", "1", "%", {{"1", "1x"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {"5", "5x"}, {"6", "6x"},
@@ -566,7 +581,7 @@ void OptionsSheet::BuildRows()
 	}
 	for (const OptionGroup& g : OptionGroups())
 	{
-		if (g.tab != m_tab || (g.game_only && m_global))
+		if (g.tab != m_tab || (g.game_only && m_global) || (g.global_only && !m_global))
 			continue;
 		add(Kind::Header, g.title);
 		for (const OptionDef& d : g.items)

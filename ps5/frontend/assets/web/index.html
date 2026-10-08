@@ -325,6 +325,17 @@ const GROUPS = [
       placeholder: "/mnt/ext1/PS2/bios",
       hint: "Where to look for the BIOS first. Without it: /data/PCSX2/bios, then /data/PCSX2 and the drives' bios/ and PCSX2/bios/ folders. Read when PS5SX2 starts." },
   ]},
+  // vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): a game off the shelf (its own file only;
+  // fe_games.cpp ReadBadges), and the switch for all games that puts hidden games back on it, dimmed. The sheet has the
+  // same two groups (fe_options.cpp); from here they apply the next time the shelf opens.
+  { title: "Shelf", game: true, items: [
+    { key: "PS5SX2/HideGame", label: "Hide from the shelf", type: "toggle", def: "false", short: "Hidden %",
+      hint: "Takes this game off the shelf. Show hidden games (All games) puts hidden games back on the shelf, dimmed, to turn this off again. Set here, it applies the next time the shelf opens; on the shelf's own sheet, when the sheet closes." },
+  ]},
+  { title: "Shelf", global: true, items: [
+    { key: "PS5SX2/ShowHiddenGames", label: "Show hidden games", type: "toggle", def: "false", short: "Hidden games %",
+      hint: "Puts the games hidden from the shelf back on it, dimmed, so you can open one and turn Hide from the shelf off. Set here, it applies the next time the shelf opens." },
+  ]},
   { title: "Display", items: [
     { key: "upscale_multiplier", label: "Resolution", type: "seg", def: "1", short: "%",
       options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"],["8","8x (PS5 Pro)"]],

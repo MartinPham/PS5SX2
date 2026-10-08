@@ -27,8 +27,14 @@ for c in "$la"/libarchive/*.c; do
   "$CC" -O1 -g -w -DHAVE_CONFIG_H -I"$la" -I"$la/libarchive" "${san[@]}" -c "$c" -o "$o"
   objs+=("$o")
 done
-"$CXX" -std=c++20 -O1 -g -Wall -I"$fe" -I"$pcsx2/pcsx2" -I"$la/libarchive" -I"$pcsx2/3rdparty/rapidjson/include" "${san[@]}" \
-  "$here/texpacks_test.cpp" "$fe/fe_texpacks.cpp" "$fe/fe_settings.cpp" "${objs[@]}" -lz -lpthread -o "$work/texpacks_test"
+# 2026-10-08: fe_settings.cpp's ManualFixSettings needs fe_games.cpp's GameDbHwFixes (vk-285-132), and fe_games.cpp what the
+# hardware fixes test links with it (the image readers' lz4 and the libchdr stand-in).
+"$CC" -O1 -g -c "$pcsx2/ps5/third_party/lz4/lz4.c" -o "$work/obj/lz4.o"
+"$CC" -O1 -g -I"$pcsx2/3rdparty/libchdr/include" -c "$here/chd_stub.c" -o "$work/obj/chd_stub.o"
+"$CXX" -std=c++20 -O1 -g -Wall -Wno-unused-function -I"$fe" -I"$pcsx2/pcsx2" -I"$la/libarchive" -I"$pcsx2/3rdparty/rapidjson/include" \
+  -I"$pcsx2/3rdparty/vulkan/include" -I"$pcsx2/3rdparty/libchdr/include" -I"$pcsx2/ps5/third_party/lz4" "${san[@]}" \
+  "$here/texpacks_test.cpp" "$fe/fe_texpacks.cpp" "$fe/fe_settings.cpp" "$fe/fe_games.cpp" "$fe/fe_covers.cpp" "$fe/fe_text.cpp" \
+  "$fe/fe_i18n.cpp" "${objs[@]}" "$work/obj/lz4.o" "$work/obj/chd_stub.o" -lz -lpthread -o "$work/texpacks_test"
 
 # The fixtures: a pack laid out as archive.org's are (with the maker's dumps/ and a readme beside it), and a two-disc one.
 mkdir -p "$work/fixtures" "$work/run"

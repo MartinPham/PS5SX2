@@ -234,7 +234,7 @@ bool ParseStep(const std::string& line, std::vector<Step>& out)
 		s >> st.arg >> st.seconds;
 	else if (st.op == "down" || st.op == "up") // pr9n: a button stays down until its "up" (chords pressed one after the other)
 		s >> st.arg;
-	else if (st.op == "expect") // pr9n: "expect selected=4", "account=1", "sheet=0", "tab=2"; a mismatch fails the run
+	else if (st.op == "expect") // pr9n: "expect selected=4", "account=1", "sheet=0", "tab=2"; a mismatch fails the run (vk-285-137: "shelf=4")
 		s >> st.arg;
 	else if (st.op == "sleep") // 2026-10-05: real seconds, for the texture pack worker
 		s >> st.seconds;
@@ -622,7 +622,8 @@ int main(int argc, char** argv)
 			                key == "tab"      ? app.SheetTab() :
 			                key == "done"     ? app.Done() : // 2026-10-08: the shelf closed (a game, or the PS2 system menu)
 			                key == "systemmenu" ? app.SystemMenuChosen() :
-			                key == "picker"   ? app.PickerOpen() : -99; // vk-285-135
+			                key == "picker"   ? app.PickerOpen() : // vk-285-135
+			                key == "shelf"    ? app.ShelfCount() : -99; // vk-285-137: the games on the shelf
 			if (got == -99 || eq == std::string::npos)
 			{
 				std::fprintf(stderr, "[host] unknown expect: %s\n", s.arg.c_str());

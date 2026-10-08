@@ -1139,6 +1139,7 @@ void ReadBadges(GameInfo& g, const std::string& settings_dir, const std::string&
 {
 	g.badges.clear();
 	const std::string ini = settings_dir + "/" + g.stem + ".ini";
+	g.hidden = IniValue(ini, "PS5SX2/HideGame") == "true"; // vk-285-137: the game's own file only, never gs.ini
 	std::string scale = IniValue(ini, "upscale_multiplier");
 	if (scale.empty())
 		scale = IniValue(gs_ini, "upscale_multiplier");
@@ -1160,5 +1161,10 @@ void ReadBadges(GameInfo& g, const std::string& settings_dir, const std::string&
 		g.badges.push_back("16:9");
 	if (IniHasLine(ini, "Patches/Enable=60 FPS"))
 		g.badges.push_back("60 FPS");
+}
+
+bool ShowHiddenGames(const std::string& gs_ini)
+{
+	return IniValue(gs_ini, "PS5SX2/ShowHiddenGames") == "true";
 }
 } // namespace fe

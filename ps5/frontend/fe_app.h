@@ -78,7 +78,8 @@ public:
 
 	// True once a game was picked and its launch animation has played.
 	bool Done() const { return m_done; }
-	int Chosen() const { return m_selected; }
+	// vk-285-137: an index in the list Init got (games hidden from the shelf are still in it).
+	int Chosen() const { return m_index.empty() ? m_selected : m_index[static_cast<size_t>(m_selected)]; }
 	// 2026-10-08: true when Done() came from the sheet's "PS2 system menu", not a game.
 	bool SystemMenuChosen() const { return m_system_menu; }
 
@@ -89,6 +90,7 @@ public:
 	bool SheetOpen() const { return m_sheet_open; }
 	int SheetTab() const { return m_sheet.tab(); }
 	bool PickerOpen() const { return m_picker.open; } // vk-285-135
+	int ShelfCount() const { return static_cast<int>(m_games.size()); } // vk-285-137: the games on the shelf
 
 private:
 	struct Slot
@@ -105,6 +107,13 @@ private:
 	};
 
 	bool Step(int dir); // true when the selection moved
+	// vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): m_games is the shelf; a game whose
+	// settings hide it (GameInfo::hidden) waits in m_shelved, with its slot (its covers keep coming), unless Show hidden
+	// games (gs.ini) is on. m_index[i] is m_games[i]'s index in the list Init got, which the cover service and the caller use.
+	// ApplyHidden sorts the games back into the two, keeps `keep` (such an index) selected or else the next game on the
+	// shelf, and says whether the shelf changed.
+	bool ApplyHidden(int keep);
+	int PositionOf(int index) const; // m_games position of an index from Init's list; -1 when shelved
 	void Sound(Sfx sfx, float pan);
 
 	// vk-285-114: the options sheet.
@@ -168,6 +177,19 @@ private:
 	AppConfig m_cfg;
 	std::vector<GameInfo> m_games;
 	std::vector<Slot> m_slots;
+	// vk-285-137: see ApplyHidden.
+	struct Shelved
+	{
+		GameInfo game;
+		Slot slot;
+		int index = -1;
+	};
+	std::vector<Shelved> m_shelved;
+	std::vector<int> m_index;
+	bool m_show_hidden = false;
+	// vk-285-137: a line above the title for a few seconds (a game hidden, hidden games shown or not).
+	std::string m_note_text;
+	double m_note_time = -10;
 
 	int m_selected = 0;
 	bool m_system_menu = false; // 2026-10-08: the PS2 system menu was started from the sheet

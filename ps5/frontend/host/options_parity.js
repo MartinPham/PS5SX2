@@ -14,7 +14,7 @@ const GROUPS = new Function(head + "\nreturn GROUPS;")();
 const out = [];
 for (const g of GROUPS) {
   if (g.items.every((it) => it.type === "text")) continue; // 2026-10-08: a group of text fields only (Folders) isn't on the sheet
-  out.push("G " + (g.tab || "settings") + " " + g.title + (g.game ? " [one game]" : "")); // 2026-10-08: Hardware fixes
+  out.push("G " + (g.tab || "settings") + " " + g.title + (g.game ? " [one game]" : g.global ? " [all games]" : "")); // 2026-10-08: Hardware fixes; vk-285-137: Shelf
   for (const it of g.items) {
     if (it.type === "text") continue;
     const options = it.type === "toggle" ? [["false", "Off"], ["true", "On"]] : it.options;

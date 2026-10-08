@@ -32,7 +32,7 @@ int main()
 	for (const fe::OptionGroup& g : fe::OptionGroups())
 	{
 		std::printf("G %s %s%s\n", g.tab == fe::kTabControls ? "controls" : "settings", g.title.c_str(),
-			g.game_only ? " [one game]" : ""); // 2026-10-08: Hardware fixes
+			g.game_only ? " [one game]" : g.global_only ? " [all games]" : ""); // 2026-10-08: Hardware fixes; vk-285-137: Shelf
 		for (const fe::OptionDef& d : g.items)
 		{
 			std::string choices;
