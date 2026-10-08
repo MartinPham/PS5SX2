@@ -901,6 +901,7 @@ void WebServer::ApiSettings(const Request& req, Response& res)
 	const bool has_preset = PresetSection(m_cfg.presets, g ? g->serial : std::string("@global"), preset);
 	const IniState rec = ReadState(preset);
 	const std::vector<std::string>& enabled = own.enabled;
+	const std::vector<std::string>& cheats_on = own.cheats; // 2026-10-08
 	std::string out = "{\"id\":" + Json(id) + ",\"title\":" + Json(g ? g->title : "All games") + ",\"serial\":" +
 	                  Json(g ? g->serial : "") + ",\"file\":" + Json(g ? "settings/" + g->stem + ".ini" : "gs.ini") +
 	                  ",\"exists\":" + (Exists(path) ? "true" : "false") + ",\"values\":" + KvJson(own);
@@ -934,7 +935,53 @@ void WebServer::ApiSettings(const Request& req, Response& res)
 			}
 		}
 	}
-	res.body = out + "]}";
+	out += "]";
+	// 2026-10-08 (AI-assisted): the game's cheat groups, the same way (only where the app has a cheats folder, so a page from
+	// before answers as it did).
+	if (!m_cfg.cheats_dir.empty())
+	{
+		out += ",\"cheats\":[";
+		if (g)
+		{
+			bool first = true;
+			const std::vector<PatchGroup> groups = PatchGroups(m_cfg.cheats_dir, g->serial);
+			for (const PatchGroup& c : groups)
+			{
+				const bool on = std::find(cheats_on.begin(), cheats_on.end(), c.name) != cheats_on.end();
+				out += std::string(first ? "" : ",") + "{\"name\":" + Json(c.name) + ",\"file\":" + Json(c.file) +
+				       ",\"description\":" + Json(c.description) + ",\"enabled\":" + (on ? "true" : "false") + "}";
+				first = false;
+			}
+			for (const std::string& e : cheats_on)
+			{
+				bool listed = false;
+				for (const PatchGroup& c : groups)
+					listed = listed || c.name == e;
+				if (!listed)
+				{
+					out += std::string(first ? "" : ",") + "{\"name\":" + Json(e) + ",\"file\":\"\",\"description\":" +
+					       Json("no cheat file has this group") + ",\"enabled\":true}";
+					first = false;
+				}
+			}
+		}
+		out += "]";
+	}
+	// 2026-10-08 (AI-assisted): the game's own hardware-renderer fixes (the game database's), as the settings that set them by
+	// hand (fe_settings.cpp ManualFixSettings): the page's Hardware fixes rows show them while manual fixes are off and write
+	// them when manual fixes go on. Only for a game the database has such fixes for (a page from before answers as it did).
+	if (g)
+	{
+		const std::vector<std::pair<std::string, std::string>> fixes = ManualFixSettings(g->serial);
+		if (!fixes.empty())
+		{
+			out += ",\"gamefixes\":{";
+			for (size_t i = 0; i < fixes.size(); i++)
+				out += std::string(i ? "," : "") + Json(fixes[i].first) + ":" + Json(fixes[i].second);
+			out += "}";
+		}
+	}
+	res.body = out + "}";
 }
 
 // The body is one change a line: "set <key>=<value>", "unset <key>", "patch+ <group>" or
@@ -1035,7 +1082,7 @@ void WebServer::ApiSave(const Request& req, Response& res)
 			lines.erase(std::remove_if(lines.begin(), lines.end(), [&](const IniLine& l) { return l.kv && l.key == key; }), lines.end());
 			changes++;
 		}
-		else if ((verb == "patch+" || verb == "patch-") && g)
+		else if ((verb == "patch+" || verb == "patch-" || verb == "cheat+" || verb == "cheat-") && g)
 		{
 			if (arg.empty() || arg.size() > 100 || !SafeValue(arg))
 			{
@@ -1043,22 +1090,25 @@ void WebServer::ApiSave(const Request& req, Response& res)
 				res.body = Error("bad patch name");
 				return;
 			}
-			const bool on = verb == "patch+";
+			// 2026-10-08: cheat+/cheat- the same way, on Cheats/Enable lines.
+			const bool cheat = verb[0] == 'c';
+			const std::string list_key = cheat ? "Cheats/Enable" : "Patches/Enable";
+			const bool on = verb.back() == '+';
 			bool present = false;
 			for (const IniLine& l : lines)
-				present = present || (l.kv && l.key == "Patches/Enable" && l.value == arg);
+				present = present || (l.kv && l.key == list_key && l.value == arg);
 			if (on && !present)
 			{
 				IniLine l;
-				l.raw = "Patches/Enable=" + arg;
-				l.key = "Patches/Enable";
+				l.raw = list_key + "=" + arg;
+				l.key = list_key;
 				l.value = arg;
 				l.kv = true;
 				lines.push_back(l);
 			}
 			else if (!on)
 				lines.erase(std::remove_if(lines.begin(), lines.end(),
-								[&](const IniLine& l) { return l.kv && l.key == "Patches/Enable" && l.value == arg; }),
+								[&](const IniLine& l) { return l.kv && l.key == list_key && l.value == arg; }),
 					lines.end());
 			changes++;
 		}

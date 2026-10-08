@@ -43,6 +43,7 @@ struct WebConfig
 	std::string settings_dir;           // settings/<image stem>.ini
 	std::string gs_ini;                 // the settings every game shares
 	std::string patches_dir;            // <serial>_<crc>.pnach
+	std::string cheats_dir;             // 2026-10-08: cheats' <serial>_<crc>.pnach ("" leaves cheats off the page)
 	std::string covers_dir;             // the user's covers: <serial|stem|title>.jpg/.png
 	std::string cache_dir;              // downloaded covers: <serial>.jpg
 	std::string token_path;             // unused since vk-285-118 (no key); kept for the host harness's build of the 1.50 page

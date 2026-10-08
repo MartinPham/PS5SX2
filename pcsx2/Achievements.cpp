@@ -286,6 +286,14 @@ namespace Achievements
 	static std::vector<LeaderboardTrackerIndicator> s_active_leaderboard_trackers;
 	static std::vector<AchievementChallengeIndicator> s_active_challenge_indicators;
 	static std::optional<AchievementProgressIndicator> s_active_progress_indicator;
+#ifdef PS5SX2_ACHIEVEMENTS
+	// 2026-10-08 (AI-assisted): the active challenges' badges for the GS thread (OrbisChallengeBadges), copied under a lock of
+	// their own so the GS thread never waits on the achievements lock; the generation says when they changed.
+	static std::mutex s_orbis_challenge_mutex;
+	static std::vector<std::string> s_orbis_challenge_badges;
+	static std::atomic<u32> s_orbis_challenge_generation{0};
+	static void OrbisChallengesChanged();
+#endif
 } // namespace Achievements
 
 
@@ -1182,6 +1190,9 @@ void Achievements::ClearGameInfo()
 
 	s_active_leaderboard_trackers = {};
 	s_active_challenge_indicators = {};
+#ifdef PS5SX2_ACHIEVEMENTS
+	OrbisChallengesChanged(); // 2026-10-08: no corner icons once the game is gone
+#endif
 	s_active_progress_indicator.reset();
 	s_game_id = 0;
 	s_game_title = {};
@@ -1509,6 +1520,9 @@ void Achievements::HandleAchievementChallengeIndicatorShowEvent(const rc_client_
 	{
 		it->show_hide_time.Reset();
 		it->active = true;
+#ifdef PS5SX2_ACHIEVEMENTS
+		OrbisChallengesChanged();
+#endif
 		return;
 	}
 
@@ -1519,6 +1533,9 @@ void Achievements::HandleAchievementChallengeIndicatorShowEvent(const rc_client_
 	s_active_challenge_indicators.push_back(std::move(indicator));
 
 	DevCon.WriteLn("Achievements: Show challenge indicator for %u (%s)", event->achievement->id, event->achievement->title);
+#ifdef PS5SX2_ACHIEVEMENTS
+	OrbisChallengesChanged();
+#endif
 }
 
 void Achievements::HandleAchievementChallengeIndicatorHideEvent(const rc_client_event_t* event)
@@ -1531,7 +1548,43 @@ void Achievements::HandleAchievementChallengeIndicatorHideEvent(const rc_client_
 	DevCon.WriteLn("Achievements: Hide challenge indicator for %u (%s)", event->achievement->id, event->achievement->title);
 	it->show_hide_time.Reset();
 	it->active = false;
+#ifdef PS5SX2_ACHIEVEMENTS
+	OrbisChallengesChanged();
+#endif
 }
+
+#ifdef PS5SX2_ACHIEVEMENTS
+// 2026-10-08 (AI-assisted; a tester: "RA challenge indicator icon bottom-right with an on/off"): PCSX2 draws the active
+// challenges' badges with ImGui (DrawGameOverlays), which this port doesn't have; GSRenderer.cpp draws them in the bottom
+// right corner instead (PS5SX2/RAChallengeIcons). Called with the achievements lock held (the event handlers, the unload).
+// An indicator re-shown in the same session still has its entry here (only DrawGameOverlays erased faded ones): the
+// active ones are what count. Needs proper testing on the console.
+void Achievements::OrbisChallengesChanged()
+{
+	std::vector<std::string> badges;
+	for (const AchievementChallengeIndicator& indicator : s_active_challenge_indicators)
+		if (indicator.active && !indicator.badge_path.empty())
+			badges.push_back(indicator.badge_path);
+	{
+		std::lock_guard<std::mutex> lock(s_orbis_challenge_mutex);
+		if (badges == s_orbis_challenge_badges)
+			return;
+		s_orbis_challenge_badges = std::move(badges);
+	}
+	s_orbis_challenge_generation.fetch_add(1, std::memory_order_release);
+}
+
+u32 Achievements::OrbisChallengeGeneration()
+{
+	return s_orbis_challenge_generation.load(std::memory_order_acquire);
+}
+
+std::vector<std::string> Achievements::OrbisChallengeBadges()
+{
+	std::lock_guard<std::mutex> lock(s_orbis_challenge_mutex);
+	return s_orbis_challenge_badges;
+}
+#endif
 
 void Achievements::HandleAchievementProgressIndicatorShowEvent(const rc_client_event_t* event)
 {

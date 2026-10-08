@@ -11,6 +11,7 @@
 #include "fe_game_achievements.h"
 #include "fe_games.h"
 #include "fe_options.h"
+#include "fe_patchdl.h"
 #include "fe_renderer.h"
 #include "fe_sound.h"
 #include "fe_texpacks.h"
@@ -47,6 +48,8 @@ struct AppConfig
 	GameAchievementsService game_achievements;
 	TextEntryService text_entry; // 2026-10-05: the PS5's own keyboard for the account panel (fe_ps5.cpp)
 	TexturePackService texture_packs; // 2026-10-05: HD texture packs from archive.org (fe_texpacks.h); unset: no row
+	OnlinePatchService online_patches; // 2026-10-08: a game's patches and cheats from GitHub (fe_patchdl.h); unset: no row
+	bool system_menu = false; // 2026-10-08: the sheet for all games offers the PS2 system menu (App::SystemMenuChosen)
 };
 
 class App
@@ -68,6 +71,8 @@ public:
 	// True once a game was picked and its launch animation has played.
 	bool Done() const { return m_done; }
 	int Chosen() const { return m_selected; }
+	// 2026-10-08: true when Done() came from the sheet's "PS2 system menu", not a game.
+	bool SystemMenuChosen() const { return m_system_menu; }
 
 	const std::vector<GameInfo>& games() const { return m_games; }
 
@@ -104,6 +109,7 @@ private:
 	// 2026-10-05: the sheet's HD texture pack row (fe_texpacks.h): its buttons, what it shows, its help line, and the
 	// shelf's line while a pack is on its way.
 	void UpdateTexturePackRow(const Input& in, double now);
+	std::string OnlinePatchValue() const; // 2026-10-08: the "Get patches and cheats" row's value
 	std::string TexturePackValue(const TexturePackStatus& s, int pick) const;
 	std::string TexturePackHelp(const TexturePackStatus& s, int pick, const std::string& serial) const;
 	void BuildTexturePackActivity(std::vector<UiVertex>& ui, float x, float y, float k, uint32_t accent);
@@ -121,6 +127,7 @@ private:
 	std::vector<Slot> m_slots;
 
 	int m_selected = 0;
+	bool m_system_menu = false; // 2026-10-08: the PS2 system menu was started from the sheet
 	float m_scroll = 0, m_scroll_vel = 0; // the shelf's position (a game index), sprung to m_selected
 	double m_time = 0;
 	double m_select_time = -10;            // when the selection last changed (for the sheen)
@@ -166,6 +173,9 @@ private:
 	double m_texpack_armed_until = -1;
 	std::string m_texpack_seen_serial;
 	TexturePackStatus::State m_texpack_seen = TexturePackStatus::State::Loading;
+	// 2026-10-08: the online patches' state last seen for the sheet's game (a finished fetch reloads the sheet's rows).
+	std::string m_online_seen_serial;
+	OnlinePatchStatus::State m_online_seen = OnlinePatchStatus::State::Idle;
 
 	bool m_launching = false;
 	double m_launch_time = 0;

@@ -18,6 +18,7 @@
 #include "fe_text.h"
 #include "fe_https.h"
 #include "fe_texpacks.h"
+#include "fe_patchdl.h" // 2026-10-08
 #include "fe_vk.h"
 #include "fe_web.h"
 #include "ps5/coreorbis/orbis-shims/ProsperoNotify.h" // 2026-10-05: the texture packs' popup
@@ -432,6 +433,13 @@ Http g_http;
 // pack through the download redirect this way on the console. Needs proper testing in the app.
 struct TexHttp
 {
+	explicit TexHttp(const char* name = "pcsx2-texpacks", const char* tag = "texpacks")
+		: pool_name(name)
+		, log_tag(tag)
+	{
+	}
+	const char* pool_name; // 2026-10-08: a second client for the online patches (its own pool and log tag)
+	const char* log_tag;
 	std::mutex mutex; // the client's setup
 	int pool = -1;
 	std::unique_ptr<HttpsClient> client;
@@ -448,21 +456,22 @@ struct TexHttp
 		const int gs = sceNetCtlGetState(state);
 		if (gs == 0 && state[0] >= 0 && state[0] < 3)
 		{
-			std::printf("[texpacks] the console is not connected (netctl state %d)\n", state[0]);
+			std::printf("[%s] the console is not connected (netctl state %d)\n", log_tag, state[0]);
 			std::fflush(stdout);
 			return nullptr;
 		}
 		sceNetInit();
 		if (pool < 0)
-			pool = sceNetPoolCreate("pcsx2-texpacks", 64 * 1024, 0);
+			pool = sceNetPoolCreate(pool_name, 64 * 1024, 0);
 		if (pool < 0)
 		{
-			std::printf("[texpacks] no libnet pool (%#x)\n", static_cast<unsigned>(pool));
+			std::printf("[%s] no libnet pool (%#x)\n", log_tag, static_cast<unsigned>(pool));
 			std::fflush(stdout);
 			return nullptr;
 		}
-		auto made = std::make_unique<HttpsClient>(MakeConsoleHttpsPlatform(pool, [](const std::string& line) {
-			std::printf("[texpacks] %s\n", line.c_str());
+		const char* const tag = log_tag;
+		auto made = std::make_unique<HttpsClient>(MakeConsoleHttpsPlatform(pool, [tag](const std::string& line) {
+			std::printf("[%s] %s\n", tag, line.c_str());
 			std::fflush(stdout);
 		}));
 		std::string error;
@@ -501,6 +510,7 @@ struct TexHttp
 	}
 };
 TexHttp g_texhttp;
+TexHttp g_patchhttp("pcsx2-patches", "patches"); // 2026-10-08: the online patches' own client (fe_patchdl.h)
 
 // The free space of a folder's disk for the texture packs, or UINT64_MAX when the console won't say (the manager then
 // skips its room check; a full disk still fails the writes, which it reports). Two ways crashed the app on the console:
@@ -860,7 +870,7 @@ int CountImages(const std::string& dir)
 
 bool OnUsb(const std::string& path)
 {
-	return path.compare(0, 8, "/mnt/usb") == 0;
+	return path.compare(0, 8, "/mnt/usb") == 0 || path.compare(0, 8, "/mnt/ext") == 0; // 2026-10-08: and the ext/M.2 drives
 }
 
 // cache/usb-games.txt, one "<serial>\t<stem>\t<title>" line per USB game: before the jailbreak,
@@ -1177,15 +1187,21 @@ std::vector<std::string> orbis_usb_game_dirs(const char* when)
 {
 	std::vector<std::string> dirs;
 	int drives = 0;
-	for (int i = 0; i < 8; i++)
+	// 2026-10-08 (AI-assisted; testers: "some people want ext/usb or m2"): the PS5's extended storage and M.2 drives
+	// (/mnt/ext0, /mnt/ext1) the same way as the USB drives, after them.
+	for (int i = 0; i < 10; i++)
 	{
 		char root[16];
-		std::snprintf(root, sizeof(root), "/mnt/usb%d", i);
+		if (i < 8)
+			std::snprintf(root, sizeof(root), "/mnt/usb%d", i);
+		else
+			std::snprintf(root, sizeof(root), "/mnt/ext%d", i - 8);
+		const char* const tag = i < 8 ? "usb" : "drive";
 		DIR* d = opendir(root);
 		if (!d)
 		{
 			if (when && errno != ENOENT)
-				std::printf("[usb] %s: %s: can't open (errno %d)\n", when, root, errno);
+				std::printf("[%s] %s: %s: can't open (errno %d)\n", tag, when, root, errno);
 			continue;
 		}
 		int entries = 0, isos = 0;
@@ -1232,10 +1248,10 @@ std::vector<std::string> orbis_usb_game_dirs(const char* when)
 			found += ", " + sub + "/ (" + std::to_string(n) + ")";
 		}
 		if (when)
-			std::printf("[usb] %s: %s: %d entries; disc images in %s\n", when, root, entries, found.c_str());
+			std::printf("[%s] %s: %s: %d entries; disc images in %s\n", tag, when, root, entries, found.c_str());
 	}
 	if (when && drives == 0)
-		std::printf("[usb] %s: no USB drive with files at /mnt/usb0-7\n", when);
+		std::printf("[usb] %s: no USB drive with files at /mnt/usb0-7 (nor at /mnt/ext0-1)\n", when);
 	if (when)
 		std::fflush(stdout);
 	return dirs;
@@ -1457,6 +1473,7 @@ bool orbis_web_start(const OrbisFrontendPaths& paths, const char* build_tag)
 	cfg.settings_dir = paths.settings_dir;
 	cfg.gs_ini = paths.gs_ini;
 	cfg.patches_dir = paths.patches_dir;
+	cfg.cheats_dir = paths.online_patches ? paths.cheats_dir : std::string(); // 2026-10-08
 	cfg.covers_dir = paths.covers_dir;
 	cfg.cache_dir = paths.cache_dir;
 	cfg.build_tag = build_tag ? build_tag : "";
@@ -1765,6 +1782,31 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		texpacks->Start();
 		acfg.texture_packs = texpacks->Service();
 	}
+	// 2026-10-08 (AI-assisted): a game's patches and cheats from GitHub, on the sheet's "Get patches and cheats" row
+	// (fe_patchdl.h), over its own HTTPS client. One small file a source; the worker ends when it has nothing to do.
+	OnlinePatches* online = nullptr;
+	if (paths.online_patches && !paths.patches_dir.empty() && !paths.cheats_dir.empty())
+	{
+		OnlinePatchPlatform op;
+		op.get_text = [](const std::string& url, std::string& body) {
+			body.clear();
+			return g_patchhttp.Get(url, false, 0, 0, [&body](const void* d, size_t n) {
+				if (body.size() + n > (2u << 20))
+					return false;
+				body.append(static_cast<const char*>(d), n);
+				return true;
+			});
+		};
+		op.log = [](const std::string& line) {
+			std::printf("%s\n", line.c_str());
+			std::fflush(stdout);
+		};
+		op.thread_start = [] { TexturePackThreadStart("online patches"); };
+		online = new OnlinePatches(op, paths.patches_dir, paths.cheats_dir, paths.online_patch_manifest);
+		acfg.online_patches = online->Service();
+		acfg.options.cheats_dir = paths.cheats_dir;
+	}
+	acfg.system_menu = true; // 2026-10-08: the sheet for all games offers the PS2 system menu (main-boot.cpp boots it)
 	bool ok = app.Init(&renderer, fonts, games, covers, acfg);
 	std::printf("[frontend] up in %.0f ms (%s)\n", (Now() - t0) * 1000.0, ok ? "ok" : renderer.error().c_str());
 	std::fflush(stdout);
@@ -1885,6 +1927,7 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 
 	const int chosen = app.Chosen();
 	const bool picked = ok && app.Done();
+	const bool system_menu = app.SystemMenuChosen(); // 2026-10-08
 	renderer.WaitIdle();
 	app.Shutdown();
 	// The worker may be inside a download: stop it from starting another, fail the one in flight,
@@ -1901,6 +1944,18 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		}
 		else
 			std::printf("[frontend] a texture pack job is still stopping; leaving it to end on its own\n");
+	}
+	// 2026-10-08: the online patches stop with the shelf (a request in flight is failed; the job is asked again later).
+	if (online)
+	{
+		g_patchhttp.Abort();
+		if (online->Stop(1500))
+		{
+			delete online;
+			g_patchhttp.Term();
+		}
+		else
+			std::printf("[frontend] an online patch request is still stopping; leaving it to end on its own\n");
 	}
 	const bool stopped = covers->Stop(1500);
 	renderer.Shutdown();
@@ -1933,6 +1988,13 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		return {};
 	}
 	*ran = true;
+	if (system_menu)
+	{
+		// 2026-10-08: the PS2's own menu, no disc (main-boot.cpp boots the BIOS for kOrbisSystemMenuPath). The last game stays.
+		std::printf("[frontend] picked the PS2 system menu (no disc)\n");
+		std::fflush(stdout);
+		return kOrbisSystemMenuPath;
+	}
 	const GameInfo& g = games[static_cast<size_t>(chosen)];
 	WriteLastGame(paths.top_dir, g.file);
 	std::printf("[frontend] picked %s (%s)\n", g.file.c_str(), g.serial.c_str());

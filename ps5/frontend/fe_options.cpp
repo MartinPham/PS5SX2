@@ -47,6 +47,56 @@ std::vector<OptionChoice> CropChoices()
 constexpr const char* kCropHint = "Cuts this many PS2 pixels off this side of the picture, for games with garbage at a border "
 								  "(Shadow of the Colossus). The picture keeps its proportions.";
 
+// 2026-10-08 (AI-assisted): the Hardware fixes rows (PCSX2's manual hardware fixes), as the page's Hardware fixes group.
+OptionDef Fix(OptionDef d)
+{
+	d.manual_fix = true;
+	return d;
+}
+
+// Texture offsets in thousandths of a texel (GSRendererHW::SetTCOffset: value / -1000), as the page's TC_OFFSETS.
+std::vector<OptionChoice> TexOffsetChoices()
+{
+	return {{"0", "Off"}, {"100", "100"}, {"200", "200"}, {"250", "250"}, {"300", "300"}, {"400", "400"}, {"500", "500"}, {"525", "525"},
+		{"550", "550"}, {"600", "600"}, {"700", "700"}, {"750", "750"}, {"800", "800"}, {"900", "900"}, {"1000", "1000"}};
+}
+
+constexpr const char* kTexOffsetHint = "Moves where textures are read from, in thousandths of a texel (500 is half a texel): for lines "
+									   "or stray pixels at the edges of textures when upscaled. A tester's Kingdom Hearts fix: X 525, Y 0.";
+
+std::vector<OptionDef> HardwareFixesGroup()
+{
+	return {
+		Toggle(kManualFixesKey, "Manual hardware fixes", "false", "Manual fixes %",
+			"PCSX2's fixes for upscaling glitches in this game. The rows below count while this is on; changing one turns it on, "
+			"starting from PCSX2's own fixes for the game."),
+		Fix(Seg("UserHacks_HalfPixelOffset", "Half-pixel offset", "0", "Half-pixel %",
+			{{"0", "Off"}, {"1", "Normal (vertex)"}, {"2", "Special (texture)"}, {"3", "Special (aggressive)"}, {"4", "Align to native"},
+				{"5", "Native + texture offset"}},
+			"Moves the picture by half a pixel to line up effects (bloom, blur, shadows) that sit off when upscaled.")),
+		Fix(Seg("UserHacks_native_scaling", "Native scaling", "0", "Native scaling %",
+			{{"0", "Off"}, {"1", "Normal"}, {"2", "Aggressive"}, {"3", "Normal (keep upscale)"}, {"4", "Aggressive (keep upscale)"}},
+			"Draws post-processing effects at the PS2's own size, then scales them up: for effects that break when upscaled (depth "
+			"of field, glow). Keep upscale stays sharper.")),
+		Fix(Seg("UserHacks_round_sprite_offset", "Round sprite", "0", "Round sprite %", {{"0", "Off"}, {"1", "Half"}, {"2", "Full"}},
+			"Rounds 2D sprites' texture positions: for lines and blur in 2D pictures and text when upscaled.")),
+		Fix(Toggle("UserHacks_align_sprite_X", "Align sprite", "false", "Align sprite %",
+			"Lines up sprites that leave vertical lines when upscaled.")),
+		Fix(Toggle("UserHacks_merge_pp_sprite", "Merge sprite", "false", "Merge sprite %",
+			"Draws an effect made of many sprites as one: for lines through effects when upscaled.")),
+		Fix(Seg("UserHacks_BilinearHack", "Bilinear upscale", "0", "Bilinear %", {{"0", "Auto"}, {"1", "Bilinear"}, {"2", "Nearest"}},
+			"How textures the PS2 smooths are smoothed when upscaled. Auto: PCSX2 chooses.")),
+		Fix(Seg("UserHacks_TCOffsetX", "Texture offset X", "0", "Texture offset X %", TexOffsetChoices(), kTexOffsetHint)),
+		Fix(Seg("UserHacks_TCOffsetY", "Texture offset Y", "0", "Texture offset Y %", TexOffsetChoices(), kTexOffsetHint)),
+		Fix(Seg("UserHacks_AutoFlushLevel", "Auto flush", "0", "Auto flush %", {{"0", "Off"}, {"1", "Sprites"}, {"2", "All"}},
+			"Ends a draw when it reads the picture it is drawing on, as the PS2 would: for some missing or broken effects. Costs "
+			"speed. Sprites: for sprites only.")),
+		Fix(Seg("UserHacks_TextureInsideRt", "Texture inside target", "0", "Texture in target %", {{"0", "Off"}, {"1", "Inside"}, {"2", "Merge"}},
+			"Lets a texture be read from inside a bigger picture the game drew earlier: for some missing or wrong effects. Merge also "
+			"joins pictures that touch.")),
+	};
+}
+
 // vk-285-116 (AI-assisted): the Controls tab. A button's symbol and its name ("<Cross>  Cross"), as the sheet shows them
 // (icon::Blank keeps the symbol's room with nothing drawn, so the names line up).
 std::string Sym(const char* glyph, const char* name)
@@ -299,6 +349,16 @@ const std::vector<OptionGroup>& OptionGroups()
 					"Rewired; their DNS goes in the game's network settings). It costs nothing until a game uses it. Turn it off for a "
 					"game that misbehaves with it. Takes effect when the game starts.",
 					true),
+				// 2026-10-08 (AI-assisted; testers: "Enable Host Filesystem"): PCSX2's host: device (EmuCore/HostFs).
+				Toggle("EmuCore/HostFs", "Host filesystem", "false", "Host files %",
+					"Lets homebrew read and write files in its own folder (host:), as PCSX2's Enable Host Filesystem: the ELF's folder, "
+					"or the disc image's. Only for homebrew that asks for it.",
+					true),
+				// 2026-10-08 (AI-assisted; testers asked for the full boot): PCSX2's fast boot (EmuCore/EnableFastBoot).
+				Toggle("EmuCore/EnableFastBoot", "Fast boot", "true", "Fast boot %",
+					"Off: the PS2's own start-up first, the towers and the PlayStation 2 logo, as on a PS2 (a few games want it). On "
+					"goes straight to the game.",
+					true),
 			}},
 		{"On screen",
 			{
@@ -306,7 +366,21 @@ const std::vector<OptionGroup>& OptionGroups()
 					"The box in the top right corner. Load is how busy the EE, GS and VU threads are."),
 				Toggle("PS5SX2/FpsGraph", "FPS graph", "false", "FPS graph %",
 					"A blue graph of the last minute's frame rate in the top right corner. It shows with the info box off too."),
+				// 2026-10-08 (AI-assisted): GSRenderer.cpp OrbisDrawBezel; the folder is on the settings page (no keyboard here).
+				Toggle("PS5SX2/Bezel", "Overlay picture", "false", "Overlay %",
+					"A bezel or frame drawn over the screen around the game: overlays/<game serial>.png, else overlays/default.png, in "
+					"/data/PCSX2 (or the folder named on the settings page). A PNG the screen's size with a see-through middle."),
+				// 2026-10-08 (AI-assisted): GSRenderer.cpp OrbisDrawChallengeIcons.
+				Toggle("PS5SX2/RAChallengeIcons", "Challenge icons", "true", "Challenge icons %",
+					"RetroAchievements: the badge of each challenge going on (an achievement that unlocks if you keep it up, such as "
+					"no damage taken) in the bottom right corner, while it lasts."),
 			}},
+		// 2026-10-08 (AI-assisted; a tester: "Kingdom Hearts needs HW hacks, texture offset X 525, Y 0"): PCSX2's manual hardware
+		// fixes, on a game's sheet only. While they are on, PCSX2 leaves out the game database's own fixes for the game unless
+		// the file sets the same value (GameDatabase.cpp applyGSHardwareFixes), so turning them on here writes those first
+		// (settings::ManualFixSettings). They take effect in a running game (GSRendererHW::UpdateSettings). Needs proper
+		// testing on the console.
+		{"Hardware fixes", HardwareFixesGroup(), kTabSettings, true},
 		// vk-285-115: PCSX2's crop (EmuCore/GS/CropLeft..CropBottom, PS2 pixels), as on the page. 2026-10-08: the last group of the
 		// Settings tab, as testers asked (it is set once for a game and then left).
 		{"Crop",
@@ -380,9 +454,13 @@ void OptionsSheet::Open(const OptionsPaths& paths, const GameInfo* game)
 		m_path = paths.settings_dir + "/" + game->stem + ".ini";
 		m_file_label = "settings/" + game->stem + ".ini";
 		m_header = "# " + game->title + (game->serial.empty() ? std::string() : " (" + game->serial + ")");
+		m_game_fixes = ManualFixSettings(game->serial); // 2026-10-08
+		m_elf = IsElfName(game->file.c_str());          // 2026-10-08
 	}
 	else
 	{
+		m_game_fixes.clear();
+		m_elf = false;
 		m_title = "All games";
 		m_serial.clear();
 		m_id = "@global";
@@ -407,6 +485,7 @@ void OptionsSheet::Reload()
 	}
 	m_has_preset = PresetSection(m_paths.presets, m_id, m_preset);
 	m_patches = m_global ? std::vector<PatchGroup>() : PatchGroups(m_paths.patches_dir, m_serial);
+	m_cheats = (m_global || m_paths.cheats_dir.empty()) ? std::vector<PatchGroup>() : PatchGroups(m_paths.cheats_dir, m_serial); // 2026-10-08
 	m_cards = ListCards(m_paths.memcards_dir);
 	BuildRows();
 }
@@ -438,9 +517,15 @@ void OptionsSheet::BuildRows()
 	const bool settings = m_tab == kTabSettings;
 	if (settings && (m_has_preset || !m_global))
 		add(Kind::Recommended, m_global ? "Recommended for all games" : "Recommended settings");
+	// 2026-10-08 (AI-assisted; testers: "ELF properties: disc path"): an ELF's disc, first, as PCSX2's ELF properties have it.
+	if (settings && m_elf)
+	{
+		add(Kind::Header, "ELF");
+		add(Kind::ElfDisc, "Disc image");
+	}
 	for (const OptionGroup& g : OptionGroups())
 	{
-		if (g.tab != m_tab)
+		if (g.tab != m_tab || (g.game_only && m_global))
 			continue;
 		add(Kind::Header, g.title);
 		for (const OptionDef& d : g.items)
@@ -456,11 +541,28 @@ void OptionsSheet::BuildRows()
 		add(Kind::Card, "Slot 2").slot = 2;
 		add(Kind::NewCard, "New card");
 	}
-	if (settings && !m_patches.empty())
+	// 2026-10-08 (AI-assisted; testers asked for the PS2's own boot and menu): the PS2's menu with no disc, from the sheet
+	// for all games.
+	if (settings && m_global && m_system_menu_row)
+	{
+		add(Kind::Header, "PS2");
+		add(Kind::SystemMenu, "PS2 system menu");
+	}
+	// 2026-10-08: the "Get patches and cheats" row heads the game's patches (shown with none yet), then its cheats.
+	const bool online = settings && m_online_patch_row && !m_global && !m_serial.empty();
+	if (settings && (!m_patches.empty() || online))
 	{
 		add(Kind::Header, "Patches");
+		if (online)
+			add(Kind::OnlinePatches, "Get patches and cheats");
 		for (const PatchGroup& p : m_patches)
 			add(Kind::Patch, p.name).patch_desc = p.description.empty() ? p.file : p.description + " (" + p.file + ")";
+	}
+	if (settings && !m_cheats.empty())
+	{
+		add(Kind::Header, "Cheats");
+		for (const PatchGroup& c : m_cheats)
+			add(Kind::Cheat, c.name).patch_desc = c.description.empty() ? c.file : c.description + " (" + c.file + ")";
 	}
 	add(Kind::Header, "");
 	if (settings)
@@ -506,7 +608,7 @@ std::string OptionsSheet::Value(const Row& r) const
 			return {};
 		case Kind::Option:
 		{
-			const Effective e = Get(r.def->key, r.def->def);
+			const Effective e = r.def->manual_fix ? FixValue(*r.def) : Get(r.def->key, r.def->def);
 			const int i = ChoiceIndex(*r.def, e.value);
 			return i >= 0 ? r.def->choices[static_cast<size_t>(i)].label : e.value;
 		}
@@ -528,13 +630,28 @@ std::string OptionsSheet::Value(const Row& r) const
 			const bool on = std::find(m_own.enabled.begin(), m_own.enabled.end(), r.label) != m_own.enabled.end();
 			return on ? "On" : "Off";
 		}
+		case Kind::Cheat:
+			return CheatOn(r.label) ? "On" : "Off";
 		case Kind::Recommended:
 		{
 			const IniState rec = ReadState(m_preset);
 			return SameState(m_own, rec) ? "In use" : "Use";
 		}
+		case Kind::SystemMenu:
+			return "Start";
+		case Kind::ElfDisc:
+		{
+			const std::string* v = Find(m_own, kElfDiscKey);
+			if (!v || v->empty())
+				return "No disc";
+			for (const auto& [file, title] : m_paths.disc_images)
+				if (file == *v)
+					return title;
+			return *v; // not on the shelf now: its name as set
+		}
 		case Kind::ResetAll:
 		case Kind::TexturePack: // the app's (fe_app.cpp, from fe_texpacks.h)
+		case Kind::OnlinePatches: // the app's (fe_app.cpp, from fe_patchdl.h)
 			return {};
 	}
 	return {};
@@ -556,8 +673,12 @@ OptionsSheet::From OptionsSheet::Source(const Row& r) const
 		}
 		case Kind::Patch:
 			return std::find(m_own.enabled.begin(), m_own.enabled.end(), r.label) != m_own.enabled.end() ? From::Own : From::Default;
+		case Kind::Cheat:
+			return CheatOn(r.label) ? From::Own : From::Default;
 		case Kind::Recommended:
 			return SameState(m_own, ReadState(m_preset)) ? From::Own : From::Default;
+		case Kind::ElfDisc:
+			return Find(m_own, kElfDiscKey) ? From::Own : From::Default;
 		default:
 			return From::Default;
 	}
@@ -573,6 +694,44 @@ std::string OptionsSheet::Help(const Row& r) const
 			std::string h = r.def->hint;
 			const Effective e = Get(r.def->key, r.def->def);
 			std::string from;
+			// 2026-10-08: the manual hardware fixes: whether they count now, and the game's own fixes.
+			if (r.def->key == kManualFixesKey && !m_global)
+			{
+				std::string list;
+				for (const auto& [key, value] : m_game_fixes)
+				{
+					std::string name = key, shown = value;
+					for (const OptionGroup& g : OptionGroups())
+						for (const OptionDef& d : g.items)
+							if (d.manual_fix && d.key == key)
+							{
+								name = d.label;
+								const int i = ChoiceIndex(d, value);
+								if (i >= 0)
+									shown = d.choices[static_cast<size_t>(i)].label;
+							}
+					if (name.compare(0, 10, "UserHacks_") == 0)
+						name.erase(0, 10);
+					list += (list.empty() ? "" : ", ") + name + " " + shown;
+				}
+				h += list.empty() ? " PCSX2 has no fixes of these for this game." : " This game's own fixes: " + list + ".";
+			}
+			else if (r.def->manual_fix)
+			{
+				const bool on = ManualFixesOn();
+				if (!on && e.from == From::Own)
+					from = "Set for this game; counts while Manual hardware fixes is on.";
+				else if (!on)
+					from = std::string(GameFix(r.def->key) ? "PCSX2's own fix for this game." : "PCSX2's default.") +
+					       " Changing it turns Manual hardware fixes on.";
+				else if (e.from == From::Own)
+					from = "Set for this game.";
+				else if (e.from == From::Global)
+					from = "Follows the setting for all games.";
+				else
+					from = "PCSX2's default.";
+				return h.empty() ? from : h + " " + from;
+			}
 			if (e.from == From::Own)
 				from = m_global ? "Set for all games." : "Set for this game.";
 			else if (e.from == From::Global)
@@ -606,6 +765,19 @@ std::string OptionsSheet::Help(const Row& r) const
 			       "happiest with 8 MB; bigger cards run out much later. Pick it in a slot afterwards.";
 		case Kind::Patch:
 			return r.patch_desc.empty() ? "A patch from the patches folder." : r.patch_desc;
+		case Kind::Cheat:
+			return (r.patch_desc.empty() ? std::string("A cheat from the cheats folder.") : r.patch_desc) +
+			       " Turning a cheat on turns on cheats for this game; cheats are left out in hardcore RetroAchievements mode.";
+		case Kind::ElfDisc:
+			return "The disc image this ELF runs with, as PCSX2's ELF properties set it: a patched or translated game's executable "
+			       "with its own disc, or homebrew that reads one. No disc: the ELF alone. Used when it starts.";
+		case Kind::SystemMenu:
+			return "Cross twice: the PS2's own menu with no disc in, as a PS2 with its tray empty: the memory card browser (copy and "
+			       "delete saves), the clock, the language. The memory cards set here are in the slots. Back to the shelf as from a game.";
+		case Kind::OnlinePatches:
+			return "Cross: fetch this game's patches from PCSX2's patch list and Gabominated's 50/60 fps and widescreen patches, and its "
+			       "cheats, from GitHub (by the game's serial and CRC). They show up here, each off until you turn it on. Your own files "
+			       "are never replaced.";
 		case Kind::Recommended:
 		{
 			std::string summary;
@@ -672,11 +844,19 @@ bool OptionsSheet::Step(const Row& r, int dir)
 		case Kind::Option:
 		{
 			const OptionDef& d = *r.def;
-			const Effective e = Get(d.key, d.def);
+			const Effective e = d.manual_fix ? FixValue(d) : Get(d.key, d.def);
 			const int n = static_cast<int>(d.choices.size());
 			int i = ChoiceIndex(d, e.value);
 			i = i < 0 ? 0 : ((i + dir) % n + n) % n;
-			return Save({{Change::Set, d.key, d.choices[static_cast<size_t>(i)].value}});
+			const std::string& v = d.choices[static_cast<size_t>(i)].value;
+			std::vector<Change> ch = {{Change::Set, d.key, v}};
+			// 2026-10-08: a fix changed, or manual fixes turned on, on a game's sheet: manual fixes on, from the game's own.
+			if (!m_global && (d.manual_fix || (d.key == kManualFixesKey && Truthy(v))) && !ManualFixesOn())
+			{
+				const std::vector<Change> more = ManualFixesOnChanges(d.key);
+				ch.insert(ch.end(), more.begin(), more.end());
+			}
+			return Save(ch);
 		}
 		case Kind::Card:
 		{
@@ -716,9 +896,89 @@ bool OptionsSheet::Step(const Row& r, int dir)
 			const bool on = std::find(m_own.enabled.begin(), m_own.enabled.end(), r.label) != m_own.enabled.end();
 			return Save({{on ? Change::PatchOff : Change::PatchOn, r.label, {}}});
 		}
+		case Kind::Cheat:
+			return SetCheat(r.label, !CheatOn(r.label));
+		case Kind::ElfDisc:
+		{
+			// No disc, then the shelf's disc images in its order (and the one set, when it isn't on the shelf now).
+			std::vector<std::string> list = {""};
+			for (const auto& image : m_paths.disc_images)
+				list.push_back(image.first);
+			const std::string* v = Find(m_own, kElfDiscKey);
+			const std::string cur = v ? *v : std::string();
+			if (!cur.empty() && std::find(list.begin(), list.end(), cur) == list.end())
+				list.push_back(cur);
+			const int n = static_cast<int>(list.size());
+			const int at = static_cast<int>(std::find(list.begin(), list.end(), cur) - list.begin());
+			const std::string& next = list[static_cast<size_t>(((at + dir) % n + n) % n)];
+			if (next.empty())
+				return v ? Save({{Change::Unset, kElfDiscKey, {}}}) : false;
+			return Save({{Change::Set, kElfDiscKey, next}});
+		}
 		default:
 			return false;
 	}
+}
+
+// 2026-10-08: a cheat group on or off in this game's file, and PCSX2's cheats for the game with it: on while any of its
+// groups is (EmuCore/EnableCheats; PCSX2 applies no cheat without it), unset when the last one goes.
+bool OptionsSheet::CheatOn(const std::string& name) const
+{
+	return std::find(m_own.cheats.begin(), m_own.cheats.end(), name) != m_own.cheats.end();
+}
+
+bool OptionsSheet::SetCheat(const std::string& name, bool on)
+{
+	std::vector<Change> ch = {{on ? Change::CheatOn : Change::CheatOff, name, {}}};
+	if (on)
+	{
+		if (!Truthy(Get("EmuCore/EnableCheats", "false").value) || Get("EmuCore/EnableCheats", "false").from != From::Own)
+			ch.push_back({Change::Set, "EmuCore/EnableCheats", "true"});
+	}
+	else
+	{
+		const bool others = std::any_of(m_own.cheats.begin(), m_own.cheats.end(), [&](const std::string& c) { return c != name; });
+		if (!others && Get("EmuCore/EnableCheats", "false").from == From::Own)
+			ch.push_back({Change::Unset, "EmuCore/EnableCheats", {}});
+	}
+	return Save(ch);
+}
+
+// 2026-10-08 (AI-assisted): PCSX2's manual hardware fixes (EmuCore/GS/UserHacks), on in this file or in gs.ini.
+bool OptionsSheet::ManualFixesOn() const
+{
+	return Truthy(Get(kManualFixesKey, "false").value);
+}
+
+const std::string* OptionsSheet::GameFix(const std::string& key) const
+{
+	for (const auto& kv : m_game_fixes)
+		if (kv.first == key)
+			return &kv.second;
+	return nullptr;
+}
+
+// While manual fixes are off, PCSX2 uses the game's own fix (the game database's), not what the row follows: shown so.
+OptionsSheet::Effective OptionsSheet::FixValue(const OptionDef& d) const
+{
+	Effective e = Get(d.key, d.def);
+	if (e.from != From::Own && !ManualFixesOn())
+		if (const std::string* v = GameFix(d.key))
+			e = {*v, From::Default};
+	return e;
+}
+
+// Manual fixes on, and the game's own fixes written as this file's (the ones it doesn't set already, and not `except_key`,
+// which the caller sets), so PCSX2 keeps them (GameDatabase.cpp: a fix the settings give the same value isn't left out).
+std::vector<Change> OptionsSheet::ManualFixesOnChanges(const std::string& except_key) const
+{
+	std::vector<Change> ch;
+	if (except_key != kManualFixesKey)
+		ch.push_back({Change::Set, kManualFixesKey, "true"});
+	for (const auto& [key, value] : m_game_fixes)
+		if (key != except_key && !Find(m_own, key))
+			ch.push_back({Change::Set, key, value});
+	return ch;
 }
 
 bool OptionsSheet::Reset(const Row& r)
@@ -742,6 +1002,14 @@ bool OptionsSheet::Reset(const Row& r)
 			if (std::find(m_own.enabled.begin(), m_own.enabled.end(), r.label) == m_own.enabled.end())
 				return false;
 			return Save({{Change::PatchOff, r.label, {}}});
+		case Kind::Cheat:
+			if (!CheatOn(r.label))
+				return false;
+			return SetCheat(r.label, false);
+		case Kind::ElfDisc:
+			if (!Find(m_own, kElfDiscKey))
+				return false;
+			return Save({{Change::Unset, kElfDiscKey, {}}});
 		default:
 			return false;
 	}
@@ -785,6 +1053,19 @@ bool OptionsSheet::Activate(const Row& r, double now)
 			Reload();
 			return true;
 		}
+		case Kind::SystemMenu: // 2026-10-08: the first press arms, a second within 4 s asks the app to start it
+			if (!(m_armed_row == index && now < m_armed_until))
+			{
+				m_armed_row = index;
+				m_armed_until = now + 4.0;
+				m_status = "Press again to start the PS2 system menu";
+				return false;
+			}
+			m_armed_row = -1;
+			m_system_menu = true;
+			m_status = "Starting the PS2 system menu";
+			std::printf("[options] the PS2 system menu asked for\n");
+			return true;
 		case Kind::Recommended:
 		case Kind::ResetAll:
 		{
@@ -821,6 +1102,12 @@ bool OptionsSheet::Activate(const Row& r, double now)
 					for (const OptionDef& d : g.items)
 						if (Find(m_own, d.key))
 							ch.push_back({Change::Unset, d.key, {}});
+			// 2026-10-08: and the game's own fixes that turning manual fixes on wrote without a row of their own.
+			if (m_tab == kTabSettings && !m_global)
+				for (const auto& kv : m_game_fixes)
+					if (Find(m_own, kv.first) &&
+						std::none_of(ch.begin(), ch.end(), [&](const Change& c) { return c.key == kv.first; }))
+						ch.push_back({Change::Unset, kv.first, {}});
 			if (ch.empty())
 			{
 				m_status = "Nothing to reset";

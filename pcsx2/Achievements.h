@@ -162,6 +162,11 @@ namespace Achievements
 	/// sent up to `max_ms` to reach the server (polled on the calling thread, the CPU thread). False, and the player told,
 	/// when one is still unsent.
 	bool OrbisFlushBeforeExit(int max_ms);
+	/// PS5 (2026-10-08, AI-assisted): the badge files of the challenges active now (an achievement primed: it unlocks if the
+	/// player keeps it up), for the port's own corner icons (GSRenderer.cpp; there is no ImGui to draw PCSX2's indicators).
+	/// The generation changes whenever the list does, so the GS thread asks for the list only then.
+	u32 OrbisChallengeGeneration();
+	std::vector<std::string> OrbisChallengeBadges();
 #endif
 
 #ifdef ENABLE_RAINTEGRATION

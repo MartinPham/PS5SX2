@@ -1,4 +1,5 @@
-// PS5 port frontend: the game list: disc images (.iso, .chd, .cso, .zso), their serials (read from the disc's SYSTEM.CNF),
+// PS5 port frontend: the game list: disc images (.iso, .chd, .cso, .zso, and since 2026-10-08 .bin and .img, raw or plain),
+// their serials (read from the disc's SYSTEM.CNF),
 // display titles made from Redump-style file names, and badges from the game's settings.
 //
 // Copyright (C) 2026 Spyros
@@ -8,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fe
@@ -25,8 +27,11 @@ struct GameInfo
 	std::vector<std::string> badges; // "6x", "16:9", "60 FPS"
 };
 
-// A disc image's file name: .iso, (vk-285-108) .chd, (vk-285-113) .cso or .zso, in any case, not hidden.
+// A disc image's file name: .iso, (vk-285-108) .chd, (vk-285-113) .cso or .zso, (2026-10-08) .bin or .img, in any case,
+// not hidden. ScanGames leaves out a .bin or .img under 16 MB or without an ISO 9660 volume (an audio track).
 bool IsDiscImageName(const char* name);
+// 2026-10-08: an .elf (a PS2 executable). ScanGames lists one whose first bytes are an ELF header; it has no serial.
+bool IsElfName(const char* name);
 
 // Lists the disc images in `dirs` (the first folder wins for a name found twice), sorted by title.
 std::vector<GameInfo> ScanGames(const std::vector<std::string>& dirs);
@@ -57,6 +62,10 @@ void MakeTitle(const std::string& stem, std::string& title, std::string& region,
 // language tags). False when nothing changed. Read once, on first use; an empty path reads none.
 void SetGameDbFile(const std::string& path);
 bool ApplyGameDbTitle(GameInfo& g);
+// 2026-10-08 (AI-assisted): the database's hardware-renderer fixes for a serial (its gsHWFixes, "nativeScaling" -> 3), in
+// the file's order; none when the serial isn't there or no database file is set. Fixes whose value is a function's name
+// (getSkipCount and the like) aren't in it.
+std::vector<std::pair<std::string, int>> GameDbHwFixes(const std::string& serial);
 
 // The shelf's order: by title (case-insensitive), then by file name. ScanGames sorts this way; a list whose
 // titles ApplyGameDbTitle changed sorts again.

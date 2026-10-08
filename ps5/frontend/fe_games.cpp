@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
@@ -91,10 +92,48 @@ public:
 		: m_fd(fd)
 	{
 	}
-	bool Read(uint32_t lba, void* buf, size_t len) override { return ReadAt(m_fd, static_cast<uint64_t>(lba) * 2048, buf, len); }
+	bool Read(uint32_t lba, void* buf, size_t len) override
+	{
+		if (m_block == 2048 && m_offset == 0)
+			return ReadAt(m_fd, static_cast<uint64_t>(lba) * 2048, buf, len);
+		// A raw image: sector by sector, the 2048 bytes of data m_offset bytes into each m_block-byte sector.
+		uint8_t* p = static_cast<uint8_t*>(buf);
+		for (; len; lba++)
+		{
+			const size_t n = std::min<size_t>(len, 2048);
+			if (!ReadAt(m_fd, static_cast<uint64_t>(lba) * m_block + m_offset, p, n))
+				return false;
+			p += n;
+			len -= n;
+		}
+		return true;
+	}
+
+	// 2026-10-08 (AI-assisted; testers: ".bin images don't load"): a .bin or .img is often a raw CD image, 2352-byte
+	// sectors (a PS2 CD from a .cue/.bin: mode 2 with the data 24 bytes in, or mode 1 with it 16 in), 2336 (mode 2
+	// without sync and header) or 2448 (with subcode), as PCSX2's own reader detects them (InputIsoFile::Detect). The
+	// layout that puts the ISO 9660 volume descriptor ("\1CD001") at sector 16; plain 2048-byte sectors (and false) when none
+	// does.
+	bool Detect()
+	{
+		static constexpr uint32_t kLayouts[][2] = {{2048, 0}, {2352, 24}, {2352, 16}, {2336, 8}, {2448, 24}, {2448, 16}};
+		for (const auto& layout : kLayouts)
+		{
+			m_block = layout[0];
+			m_offset = layout[1];
+			uint8_t pvd[6];
+			if (Read(16, pvd, sizeof(pvd)) && pvd[0] == 1 && std::memcmp(pvd + 1, "CD001", 5) == 0)
+				return true;
+		}
+		m_block = 2048;
+		m_offset = 0;
+		return false;
+	}
 
 private:
 	int m_fd;
+	uint32_t m_block = 2048;
+	uint32_t m_offset = 0;
 };
 
 // vk-285-108: a CHD through libchdr. A DVD image (chdman createdvd) holds 2048-byte units; a CD image
@@ -511,7 +550,14 @@ std::string DescribeImage(const std::string& image_path)
 
 bool IsDiscImageName(const char* name)
 {
-	return HasExtension(name, ".iso") || HasExtension(name, ".chd") || HasExtension(name, ".cso") || HasExtension(name, ".zso");
+	// 2026-10-08: .bin and .img too (raw CD images or plain ISOs under another name; PCSX2 reads both, VMManager.cpp's list).
+	return HasExtension(name, ".iso") || HasExtension(name, ".chd") || HasExtension(name, ".cso") || HasExtension(name, ".zso") ||
+		   HasExtension(name, ".bin") || HasExtension(name, ".img") || IsElfName(name);
+}
+
+bool IsElfName(const char* name)
+{
+	return HasExtension(name, ".elf"); // 2026-10-08: a PS2 executable (homebrew, a patched game's executable)
 }
 
 void SetSerialCacheFile(const std::string& path)
@@ -532,6 +578,7 @@ std::string ReadSerial(const std::string& image_path)
 	if (fd < 0)
 		return {};
 	IsoSectors disc(fd);
+	disc.Detect(); // 2026-10-08: a raw .bin/.img's sector layout
 	const std::string serial = SerialFromDisc(disc);
 	close(fd);
 	return serial;
@@ -644,6 +691,7 @@ bool ReadAchievementExecutable(const std::string& path, std::string& name, std::
 	if (fd < 0)
 		return false;
 	IsoSectors disc(fd);
+	disc.Detect(); // 2026-10-08: a raw .bin/.img's sector layout
 	const bool ok = read(disc);
 	close(fd);
 	return ok;
@@ -711,6 +759,7 @@ struct DbEntry
 {
 	std::string name;
 	std::string region; // PCSX2's "NTSC-U", "PAL-E", ...
+	std::vector<std::pair<std::string, int>> hw_fixes; // 2026-10-08: gsHWFixes ("nativeScaling" -> 3), in the file's order
 };
 std::mutex s_db_mutex;
 std::string s_db_file;
@@ -754,14 +803,17 @@ void LoadDbLocked()
 	while ((n = std::fread(buf.data(), 1, buf.size(), f)) > 0)
 		text.append(buf.data(), n);
 	std::fclose(f);
-	std::string serial, name, name_en, region;
+	std::string serial, name, name_en, region, section;
+	std::vector<std::pair<std::string, int>> hw_fixes;
 	const auto flush = [&]() {
 		if (!serial.empty() && !(name_en.empty() && name.empty()))
-			s_db[serial] = DbEntry{name_en.empty() ? name : name_en, region};
+			s_db[serial] = DbEntry{name_en.empty() ? name : name_en, region, std::move(hw_fixes)};
 		serial.clear();
 		name.clear();
 		name_en.clear();
 		region.clear();
+		section.clear();
+		hw_fixes.clear();
 	};
 	const char* p = text.data();
 	const char* const end = p + text.size();
@@ -787,6 +839,21 @@ void LoadDbLocked()
 				const size_t kl = std::strlen(key);
 				return static_cast<size_t>(eol - q) > kl && std::memcmp(q, key, kl) == 0;
 			};
+			// 2026-10-08: the entry's own keys are 2 spaces in ("  gsHWFixes:"); a section's are 4 ("    nativeScaling: 3").
+			const long indent = q - p;
+			const char* colon = static_cast<const char*>(std::memchr(q, ':', static_cast<size_t>(eol - q)));
+			if (indent == 2 && colon)
+				section.assign(q, colon);
+			else if (indent == 4 && colon && colon > q && section == "gsHWFixes")
+			{
+				// "autoFlush: 1 # Fixes effects." (a fix without a value is 1, as GameDatabase.cpp reads it). The few with a
+				// function's name for a value (getSkipCount: "GSC_..."), which manual fixes don't touch, are left out.
+				const std::string value = YamlValue(colon + 1, eol);
+				char* stop = nullptr;
+				const long v = value.empty() ? 1 : std::strtol(value.c_str(), &stop, 10);
+				if (value.empty() || (stop && *stop == '\0'))
+					hw_fixes.emplace_back(std::string(q, colon), static_cast<int>(v));
+			}
 			if (is_key("name-en:"))
 				name_en = YamlValue(q + 8, eol);
 			else if (is_key("name-sort:"))
@@ -898,6 +965,16 @@ bool ApplyGameDbTitle(GameInfo& g)
 	return true;
 }
 
+std::vector<std::pair<std::string, int>> GameDbHwFixes(const std::string& serial)
+{
+	if (serial.empty())
+		return {};
+	std::lock_guard<std::mutex> lock(s_db_mutex);
+	LoadDbLocked();
+	const auto it = s_db.find(serial);
+	return it == s_db.end() ? std::vector<std::pair<std::string, int>>() : it->second.hw_fixes;
+}
+
 void SortGames(std::vector<GameInfo>& games)
 {
 	std::sort(games.begin(), games.end(), [](const GameInfo& a, const GameInfo& b) {
@@ -957,8 +1034,35 @@ void ScanDir(const std::string& dir, std::vector<GameInfo>& games, std::vector<s
 		struct stat st = {};
 		if (stat(g.path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
 			continue;
+		// 2026-10-08: an .elf is listed when it is one (its first bytes "\x7fELF"): homebrew, or a game's executable that runs
+		// with a disc (the sheet's Disc image row; main-boot.cpp boots it as PCSX2 boots an ELF).
+		if (IsElfName(file.c_str()))
+		{
+			char magic[4] = {};
+			const int fd = open(g.path.c_str(), O_RDONLY);
+			const bool elf = fd >= 0 && read(fd, magic, sizeof(magic)) == 4 && std::memcmp(magic, "\x7f" "ELF", 4) == 0;
+			if (fd >= 0)
+				close(fd);
+			if (!elf)
+				continue;
+		}
+		// 2026-10-08: a .bin or .img under 16 MB is no PS2 disc (a BIOS dump, a memory card), and one without an ISO 9660
+		// volume in any sector layout is no data disc (the audio tracks of a .cue/.bin set, "Game (Track 2).bin"): not listed.
+		if (HasExtension(file.c_str(), ".bin") || HasExtension(file.c_str(), ".img"))
+		{
+			if (st.st_size < (16LL << 20))
+				continue;
+			const int fd = open(g.path.c_str(), O_RDONLY);
+			if (fd < 0)
+				continue;
+			IsoSectors disc(fd);
+			const bool data_disc = disc.Detect();
+			close(fd);
+			if (!data_disc)
+				continue;
+		}
 		g.file = file;
-		g.stem = file.substr(0, file.size() - 4); // ".iso", ".chd", ".cso", ".zso"
+		g.stem = file.substr(0, file.size() - 4); // ".iso", ".chd", ".cso", ".zso", ".bin", ".img"
 		g.bytes = static_cast<uint64_t>(st.st_size);
 		MakeTitle(g.stem, g.title, g.region, g.extra);
 		games.push_back(g);

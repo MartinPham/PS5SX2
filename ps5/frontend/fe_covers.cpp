@@ -251,8 +251,8 @@ std::vector<std::string> Wrap(const Fonts& fonts, const std::string& text, float
 
 std::string UsbDriveRoot(const std::string& path)
 {
-	// "/mnt/usb<n>/..." (fe_ps5.cpp lists /mnt/usb0 to /mnt/usb7)
-	if (path.compare(0, 8, "/mnt/usb") != 0)
+	// "/mnt/usb<n>/..." (fe_ps5.cpp lists /mnt/usb0 to /mnt/usb7), 2026-10-08: and "/mnt/ext<n>/..." (extended storage, M.2)
+	if (path.compare(0, 8, "/mnt/usb") != 0 && path.compare(0, 8, "/mnt/ext") != 0)
 		return {};
 	size_t i = 8;
 	while (i < path.size() && path[i] >= '0' && path[i] <= '9')

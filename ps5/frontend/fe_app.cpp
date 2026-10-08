@@ -380,7 +380,7 @@ void App::Pose(float d, float t, Mat4& model, float& brightness) const
 	float x = s * Mix(0.0f, side_x, e);
 	float z = Mix(kCenterZ, side_z, e);
 	const float turn = Mix(sway, -s * Radians(kSideTurn), e);
-	if (m_launching && ad < 0.5f)
+	if (m_launching && !m_system_menu && ad < 0.5f) // 2026-10-08: the system menu isn't the selected game
 	{
 		const float l = Smoothstep(0.0f, 0.6f, static_cast<float>(m_time - m_launch_time));
 		z += l * 2.2f;
@@ -904,7 +904,14 @@ void App::OpenSheet(bool global)
 	if (m_sheet_global && m_cfg.game_achievements.cancel)
 		m_cfg.game_achievements.cancel();
 	m_sheet.SetTexturePackRow(static_cast<bool>(m_cfg.texture_packs)); // 2026-10-05
-	m_sheet.Open(m_cfg.options, g);
+	m_sheet.SetOnlinePatchRow(static_cast<bool>(m_cfg.online_patches)); // 2026-10-08
+	m_sheet.SetSystemMenuRow(m_cfg.system_menu);                        // 2026-10-08
+	OptionsPaths paths = m_cfg.options;
+	if (g && IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images
+		for (const GameInfo& other : m_games)
+			if (!IsElfName(other.file.c_str()))
+				paths.disc_images.emplace_back(other.file, other.title);
+	m_sheet.Open(paths, g);
 	m_sheet_saved_at_open = 0;
 	if (!m_sheet_open)
 	{
@@ -1009,6 +1016,19 @@ void App::UpdateSheet(double dt, const Input& in)
 		m_texpack_seen_serial = serial;
 		m_texpack_seen = st;
 	}
+	// 2026-10-08: online patches that came in while the sheet is open: their rows.
+	if (m_cfg.online_patches && !m_sheet_global && !m_games.empty())
+	{
+		const std::string& serial = m_games[static_cast<size_t>(m_selected)].serial;
+		const OnlinePatchStatus::State st = m_cfg.online_patches.status(serial).state;
+		if (serial == m_online_seen_serial && st != m_online_seen && st == OnlinePatchStatus::State::Done)
+		{
+			m_sheet.Reload();
+			RefreshBadges();
+		}
+		m_online_seen_serial = serial;
+		m_online_seen = st;
+	}
 
 	if (pressed(in.circle, m_prev.circle) || pressed(in.square, m_prev.square) || pressed(in.options, m_prev.options))
 	{
@@ -1107,6 +1127,40 @@ void App::UpdateSheet(double dt, const Input& in)
 		UpdateTexturePackRow(in, now);
 		return;
 	}
+	// 2026-10-08: "Get patches and cheats": Cross fetches the game's files (fe_patchdl.h); the rows come when it's done.
+	if (row.kind == OptionsSheet::Kind::OnlinePatches)
+	{
+		if (pressed(in.cross, m_prev.cross) && m_cfg.online_patches && !m_games.empty())
+		{
+			const GameInfo& g = m_games[static_cast<size_t>(m_selected)];
+			const bool started = m_cfg.online_patches.begin(g);
+			m_sheet_status = started ? "Looking online for " + g.title + "'s patches and cheats" : "Already looking";
+			m_sheet_status_time = now;
+			std::printf("[options] online patches for %s (%s): %s\n", g.title.c_str(), g.serial.c_str(), started ? "asked" : "already asked");
+			std::fflush(stdout);
+			Sound(started ? Sfx::Move : Sfx::Edge, 0.3f);
+		}
+		return;
+	}
+
+	// 2026-10-08: "PS2 system menu" (the sheet for all games): Cross twice starts the PS2's own menu with no disc; the shelf
+	// closes as for a game (SystemMenuChosen).
+	if (row.kind == OptionsSheet::Kind::SystemMenu)
+	{
+		if (pressed(in.cross, m_prev.cross))
+		{
+			after(m_sheet.Activate(row, now));
+			if (m_sheet.TakeSystemMenu())
+			{
+				CloseSheet();
+				m_system_menu = true;
+				m_launching = true;
+				m_launch_time = m_time;
+				Sound(Sfx::Launch, 0.0f);
+			}
+		}
+		return;
+	}
 
 	// Left and right change the value (not on the action rows, which Cross runs).
 	const bool action = row.kind == OptionsSheet::Kind::Recommended || row.kind == OptionsSheet::Kind::ResetAll;
@@ -1133,6 +1187,27 @@ void App::UpdateSheet(double dt, const Input& in)
 		after(m_sheet.Reset(row));
 		return;
 	}
+}
+
+// ---- 2026-10-08: the sheet's "Get patches and cheats" row (AI-assisted; see fe_patchdl.h) ---------------------------
+
+std::string App::OnlinePatchValue() const
+{
+	if (!m_cfg.online_patches || m_games.empty())
+		return {};
+	const OnlinePatchStatus s = m_cfg.online_patches.status(m_games[static_cast<size_t>(m_selected)].serial);
+	switch (s.state)
+	{
+		case OnlinePatchStatus::State::Idle:
+			return "Download";
+		case OnlinePatchStatus::State::Working:
+			return s.message.empty() ? std::string("Working") : s.message;
+		case OnlinePatchStatus::State::Done:
+			return s.message;
+		case OnlinePatchStatus::State::Failed:
+			return "Failed: " + s.message;
+	}
+	return {};
 }
 
 // ---- 2026-10-05: the sheet's HD texture pack row (AI-assisted; see fe_texpacks.h) -----------------------------------
@@ -1622,7 +1697,8 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 		}
 		const float mid_y = ry + bh * 0.5f + 13 * k; // the text's baseline, centred in the row
 		const float lpx = 40 * k, vpx = 38 * k; // 2026-10-05: 38 and 36 before
-		const bool action = r.kind == OptionsSheet::Kind::Recommended || r.kind == OptionsSheet::Kind::ResetAll;
+		const bool action = r.kind == OptionsSheet::Kind::Recommended || r.kind == OptionsSheet::Kind::ResetAll ||
+		                    r.kind == OptionsSheet::Kind::SystemMenu; // 2026-10-08
 
 		std::string value = m_sheet.Value(r);
 		const bool armed = m_sheet.Armed(r, m_time);
@@ -1632,6 +1708,8 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 			value.clear();
 		if (r.kind == OptionsSheet::Kind::NewCard && focused)
 			value += "  \xC2\xB7  Create";
+		if (r.kind == OptionsSheet::Kind::OnlinePatches) // 2026-10-08
+			value = OnlinePatchValue();
 		// 2026-10-05: the HD texture pack row shows the pack, the download's progress or the installed pack.
 		const bool pack_row = r.kind == OptionsSheet::Kind::TexturePack && m_cfg.texture_packs && !m_games.empty();
 		TexturePackStatus pack;

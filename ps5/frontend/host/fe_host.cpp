@@ -386,6 +386,7 @@ int main(int argc, char** argv)
 	const std::string presets_text(presets.begin(), presets.end());
 	SeedData(data, presets_text);
 	SetLanguage(lang, "");
+	SetGameDbFile(pcsx2 + "/bin/resources/GameIndex.yaml"); // 2026-10-08: the games' own hardware fixes (the Hardware fixes rows)
 
 	Gpu gpu;
 	if (!gpu.Init(w, h))
@@ -532,6 +533,7 @@ int main(int argc, char** argv)
 	}
 	acfg.build_tag = "vk-285-114 (host)";
 	acfg.options = op;
+	acfg.system_menu = true; // 2026-10-08: the sheet for all games' "PS2 system menu" row
 	acfg.refresh_game = [op](GameInfo& g) {
 		g.badges.clear();
 		ReadBadges(g, op.settings_dir, op.gs_ini, op.patches_dir);
@@ -595,7 +597,9 @@ int main(int argc, char** argv)
 			const std::string key = s.arg.substr(0, eq);
 			const int want = eq == std::string::npos ? -1 : std::atoi(s.arg.c_str() + eq + 1);
 			const int got = key == "selected" ? app.Chosen() : key == "account" ? app.AccountOpen() : key == "sheet" ? app.SheetOpen() :
-			                key == "tab"      ? app.SheetTab() : -99;
+			                key == "tab"      ? app.SheetTab() :
+			                key == "done"     ? app.Done() : // 2026-10-08: the shelf closed (a game, or the PS2 system menu)
+			                key == "systemmenu" ? app.SystemMenuChosen() : -99;
 			if (got == -99 || eq == std::string::npos)
 			{
 				std::fprintf(stderr, "[host] unknown expect: %s\n", s.arg.c_str());

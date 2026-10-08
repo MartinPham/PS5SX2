@@ -338,9 +338,10 @@ std::string OrbisFindBiosElsewhere(std::string* seen)
 		if (strcasecmp(name.c_str(), "bios") == 0 && top + "/" + name != bios && OrbisIsDir(top + "/" + name))
 			dirs.push_back(top + "/" + name);
 	}
-	for (int i = 0; i < 8; i++)
+	// 2026-10-08 (AI-assisted): and the PS5's extended storage / M.2 drives (/mnt/ext0, /mnt/ext1), as the USB drives.
+	for (int i = 0; i < 10; i++)
 	{
-		const std::string root = fmt::format("/mnt/usb{}", i);
+		const std::string root = i < 8 ? fmt::format("/mnt/usb{}", i) : fmt::format("/mnt/ext{}", i - 8);
 		const std::vector<std::string> names = OrbisNames(root);
 		if (names.empty())
 			continue;

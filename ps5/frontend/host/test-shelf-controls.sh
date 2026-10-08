@@ -36,6 +36,13 @@ run square-then-l1 "game 4" "wait 1" "down square" "wait 0.15" "expect sheet=1" 
 run both-at-once "game 4" "wait 1" "press l1+square" "wait 0.3" "expect account=1" "expect selected=4"
 run l1-alone "game 4" "wait 1" "press l1" "wait 0.6" "expect selected=0" "expect account=0" "expect sheet=0"
 run late-square "game 4" "wait 1" "down l1" "wait 0.8" "down square" "wait 0.3" "expect account=1" "expect selected=0" "up l1+square"
+# 2026-10-08: the sheet for all games' "PS2 system menu" (the row above "Reset to PCSX2's defaults"): one Cross arms it, a
+# second starts it and the shelf closes without a game.
+run system-menu "game 2" "wait 1" "press square" "wait 0.4" "press r1" "wait 0.3" "press down 70" "press up" "wait 0.2" \
+  "press cross" "wait 0.3" "expect systemmenu=0" "expect sheet=1" "press cross" "wait 1" "expect systemmenu=1" "expect done=1" \
+  "expect sheet=0"
+run system-menu-not-armed "game 2" "wait 1" "press square" "wait 0.4" "press r1" "wait 0.3" "press down 70" "press up" "wait 0.2" \
+  "press cross" "wait 4.5" "press cross" "wait 1" "expect systemmenu=0" "expect done=0" "expect sheet=1"
 run tabs-stop "game 4" "wait 1" "press square" "wait 0.5" "expect tab=0" "press l2" "wait 0.3" "expect tab=0" "press r2" "wait 0.3" \
   "expect tab=1" "press r2" "wait 0.3" "expect tab=2" "press r2" "wait 0.3" "expect tab=2" "press l2" "wait 0.3" "expect tab=1"
 if [[ $failed != 0 ]]; then

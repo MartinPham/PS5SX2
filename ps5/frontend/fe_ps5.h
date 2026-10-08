@@ -39,7 +39,16 @@ struct OrbisFrontendPaths
 	std::string textures_dir;
 	std::string texture_pack_list;
 	bool texture_packs = true;
+	// 2026-10-08: a game's patches and cheats from GitHub (fe_patchdl.h): the cheats folder, what was downloaded
+	// (cache/online-patches.txt), and whether the sheet offers it (off with the noonlinepatches flag).
+	std::string cheats_dir;
+	std::string online_patch_manifest;
+	bool online_patches = true;
 };
+
+// 2026-10-08 (AI-assisted): what orbis_frontend_run returns for the sheet's "PS2 system menu": main-boot.cpp then boots the
+// BIOS with no disc (the PS2's own menu: memory card browser, clock, language).
+inline constexpr const char kOrbisSystemMenuPath[] = "@ps2-system-menu";
 
 // Test build 1 (vk-285-55): the folders on USB drives PS5SX2 lists games from: each drive's root
 // (/mnt/usb0 to /mnt/usb7) and, when present, its DVD/ and CD/ (Open PS2 Loader's layout) and

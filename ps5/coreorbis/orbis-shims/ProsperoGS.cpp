@@ -214,6 +214,28 @@ static bool OrbisPNGLoader(const std::string& filename, GSTextureReplacements::R
   return true;
 }
 
+// 2026-10-08 (AI-assisted): a PNG file as RGBA8 pixels (R in the low byte, as GSTexture::Format::Color takes them), for the
+// RetroAchievements challenge icons and the overlay picture (GSRenderer.cpp OrbisDrawChallengeIcons, OrbisDrawBezel). False
+// when it can't be read or decoded, or is bigger than `max_side` pixels a side (a badge is 64, a 4K overlay 3840).
+bool OrbisLoadPngRgba(const std::string& path, std::vector<u32>& rgba, int& w, int& h, int max_side)
+{
+  std::optional<std::vector<u8>> file = FileSystem::ReadBinaryFile(path.c_str());
+  if (!file || file->empty() || file->size() > (48u << 20))
+    return false;
+  int comp = 0;
+  stbi_uc* const px = stbi_load_from_memory(file->data(), static_cast<int>(file->size()), &w, &h, &comp, 4);
+  if (!px)
+    return false;
+  const bool ok = w > 0 && h > 0 && w <= max_side && h <= max_side;
+  if (ok)
+  {
+    rgba.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    std::memcpy(rgba.data(), px, rgba.size() * 4);
+  }
+  stbi_image_free(px);
+  return ok;
+}
+
 // vk-285-113: a DDS file (BC1/2/3/7 or uncompressed) as an RGBA8 replacement with its mip levels.
 static bool OrbisDDSLoader(const std::string& filename, GSTextureReplacements::ReplacementTexture* tex, bool only_base_image)
 {

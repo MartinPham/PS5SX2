@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <strings.h> // 2026-10-08: strcasecmp (an .elf from the shelf)
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -1267,6 +1268,31 @@ static bool orbis_vu1_speed_from(const SettingsInterface& si)
 // the rumble.
 extern std::atomic<int> g_orbis_overlay_mode;
 extern std::atomic<int> g_orbis_fps_graph;
+extern std::atomic<int> g_orbis_ra_challenge; // 2026-10-08: PS5SX2/RAChallengeIcons (GSRenderer.cpp OrbisDrawChallengeIcons)
+// 2026-10-08 (AI-assisted): the overlay picture (GSRenderer.cpp OrbisDrawBezel): PS5SX2/Bezel and PS5SX2/BezelDir, live.
+extern std::atomic<int> g_orbis_bezel;
+extern std::atomic<u32> g_orbis_bezel_gen;
+static std::mutex g_orbis_bezel_mutex;
+static std::string g_orbis_bezel_dir;
+std::string OrbisBezelDirectory()
+{
+  std::lock_guard<std::mutex> lock(g_orbis_bezel_mutex);
+  return g_orbis_bezel_dir;
+}
+static void orbis_set_bezel(bool on, const std::string& dir)
+{
+  {
+    std::lock_guard<std::mutex> lock(g_orbis_bezel_mutex);
+    if (on == (g_orbis_bezel.load(std::memory_order_relaxed) != 0) && dir == g_orbis_bezel_dir)
+      return;
+    g_orbis_bezel_dir = dir;
+    g_orbis_bezel.store(on ? 1 : 0, std::memory_order_relaxed);
+  }
+  g_orbis_bezel_gen.fetch_add(1, std::memory_order_release);
+  printf("[boot] overlay picture %s (PS5SX2/Bezel), from %s\n", on ? "on" : "off",
+    dir.empty() ? "/data/PCSX2/overlays" : (dir + ", then /data/PCSX2/overlays (PS5SX2/BezelDir)").c_str());
+  fflush(stdout);
+}
 
 // vk-285-113: a game's texture pack outside /data/PCSX2/textures: PS5SX2/TexturesDir/<serial>, or a USB drive's
 // PS5SX2/textures, PCSX2/textures or textures folder (orbis-shims/OrbisTextureRoots.h; GSTextureReplacements.cpp asks
@@ -1297,9 +1323,22 @@ static void orbis_ps5opts_from(const SettingsInterface& si)
   s32 overlay = -1;
   if (!si.GetIntValue("PS5SX2", "Overlay", &overlay) || overlay < 0 || overlay > 2)
     overlay = -1;
-  bool graph = false, rumble = true;
+  bool graph = false, rumble = true, challenge = true;
   si.GetBoolValue("PS5SX2", "FpsGraph", &graph);
   si.GetBoolValue("PS5SX2", "Rumble", &rumble);
+  si.GetBoolValue("PS5SX2", "RAChallengeIcons", &challenge); // 2026-10-08 (AI-assisted): the RetroAchievements challenge icons
+  {
+    bool bezel = false; // 2026-10-08 (AI-assisted): the overlay picture
+    std::string bezel_dir;
+    si.GetBoolValue("PS5SX2", "Bezel", &bezel);
+    si.GetStringValue("PS5SX2", "BezelDir", &bezel_dir);
+    orbis_set_bezel(bezel, bezel_dir);
+  }
+  if (g_orbis_ra_challenge.exchange(challenge ? 1 : 0, std::memory_order_relaxed) != (challenge ? 1 : 0))
+  {
+    printf("[boot] RetroAchievements challenge icons %s (PS5SX2/RAChallengeIcons)\n", challenge ? "on" : "off");
+    fflush(stdout);
+  }
   const int old_overlay = g_orbis_overlay_mode.exchange(overlay, std::memory_order_relaxed);
   const int old_graph = g_orbis_fps_graph.exchange(graph ? 1 : 0, std::memory_order_relaxed);
   const int old_rumble = g_orbis_rumble_on.exchange(rumble ? 1 : 0, std::memory_order_relaxed);
@@ -1827,9 +1866,58 @@ static void orbis_back_to_menu()
 // Test build 1 (vk-285-55): the USB folders games are listed from, looked up before the jailbreak
 // (for the cover prefetch; the sandbox may not show the drives yet) and again after it.
 static std::vector<std::string> s_usb_dirs;
+
+// 2026-10-08 (AI-assisted; testers: "have users select their bios and games scan path (across the entire possible paths)
+// some people want ext/usb or m2"): gs.ini's PS5SX2/GameFolders, folders separated by ';' (the settings page, all games),
+// listed like the drives' (with one level of folders in them), and PS5SX2/BiosFolder, where the BIOS is looked for first.
+// The drives themselves (/mnt/usb0-7, /mnt/ext0-1) are looked through without them (orbis_usb_game_dirs, BiosTools.cpp).
+static std::string orbis_gs_ini_string(const char* key)
+{
+  MemorySettingsInterface peek;
+  orbis_apply_ini_file(peek, "/data/PCSX2/gs.ini", "gs.ini", true);
+  std::string value;
+  peek.GetStringValue("PS5SX2", key, &value);
+  return value;
+}
+
+static std::vector<std::string> orbis_extra_game_folders(const char* when)
+{
+  std::vector<std::string> dirs;
+  const std::string list = orbis_gs_ini_string("GameFolders");
+  size_t at = 0;
+  while (at <= list.size())
+  {
+    size_t end = list.find_first_of(";|", at);
+    if (end == std::string::npos)
+      end = list.size();
+    std::string dir = list.substr(at, end - at);
+    while (!dir.empty() && (dir.back() == ' ' || dir.back() == '/'))
+      dir.pop_back();
+    while (!dir.empty() && dir.front() == ' ')
+      dir.erase(0, 1);
+    at = end + 1;
+    if (dir.empty())
+      continue;
+    struct stat st = {};
+    const bool ok = dir[0] == '/' && stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+    if (when)
+      printf("[boot] %s: game folder %s (PS5SX2/GameFolders)%s\n", when, dir.c_str(), ok ? "" : ": not a folder here, skipped");
+    if (ok && std::find(dirs.begin(), dirs.end(), dir) == dirs.end())
+      dirs.push_back(dir);
+  }
+  if (when && !dirs.empty())
+    fflush(stdout);
+  return dirs;
+}
+
 static void orbis_scan_usb(const char* when)
 {
   s_usb_dirs = orbis_usb_game_dirs(when);
+  for (const std::string& dir : orbis_extra_game_folders(when)) // 2026-10-08
+  {
+    if (std::find(s_usb_dirs.begin(), s_usb_dirs.end(), dir) == s_usb_dirs.end())
+      s_usb_dirs.push_back(dir);
+  }
 }
 
 // Test build 1: the logs report's first lines (the settings page's Download logs).
@@ -1875,7 +1963,63 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   fe.textures_dir = "/data/PCSX2/textures";
   fe.texture_pack_list = OrbisDir("cache") + "/texture-packs.json";
   fe.texture_packs = !orbis_flag("notexpacks");
+  // 2026-10-08 (AI-assisted): a game's patches and cheats from GitHub (the sheet's "Get patches and cheats"), into the
+  // folders PCSX2 reads them from (EmuFolders::Patches and ::Cheats below).
+  fe.cheats_dir = OrbisDir("cheats");
+  fe.online_patch_manifest = OrbisDir("cache") + "/online-patches.txt";
+  fe.online_patches = !orbis_flag("noonlinepatches");
   return fe;
+}
+
+// 2026-10-08 (AI-assisted): an ELF's disc image (PS5SX2/ElfDisc in its settings file): a full path, or a file name the shelf
+// lists, looked for in the folders it lists games from (games/, /data/PCSX2, the drives' and the extra folders) and one folder
+// down in each, the first found winning as on the shelf. "" when unset or not found.
+static std::string orbis_elf_disc()
+{
+  if (s_game_ini_path.empty())
+    return {};
+  MemorySettingsInterface peek;
+  orbis_apply_ini_file(peek, s_game_ini_path.c_str(), "game ini", true);
+  std::string want;
+  if (!peek.GetStringValue("PS5SX2", "ElfDisc", &want) || want.empty())
+    return {};
+  struct stat st = {};
+  const auto is_file = [&](const std::string& p) { return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode); };
+  if (want.find('/') != std::string::npos)
+  {
+    if (is_file(want))
+      return want;
+    printf("[boot] the ELF's disc %s isn't there\n", want.c_str());
+    return {};
+  }
+  std::vector<std::string> dirs = {OrbisDir("games"), "/data/PCSX2"};
+  dirs.insert(dirs.end(), s_usb_dirs.begin(), s_usb_dirs.end());
+  for (const std::string& dir : dirs)
+  {
+    if (is_file(dir + "/" + want))
+      return dir + "/" + want;
+    DIR* d = opendir(dir.c_str());
+    if (!d)
+      continue;
+    std::string found;
+    int subdirs = 0;
+    while (const dirent* e = readdir(d))
+    {
+      if (e->d_name[0] == '.' || ++subdirs > 64)
+        continue;
+      const std::string p = dir + "/" + e->d_name + "/" + want;
+      if (is_file(p))
+      {
+        found = p;
+        break;
+      }
+    }
+    closedir(d);
+    if (!found.empty())
+      return found;
+  }
+  printf("[boot] the ELF's disc %s isn't in the game folders\n", want.c_str());
+  return {};
 }
 
 // vk-285-45: the flags folder before and after the jailbreak. Before it, the sandbox answers
@@ -2357,6 +2501,21 @@ int main()
   EmuFolders::DataRoot = "/data/PCSX2";
   // vk-285-33: sub-folders when they exist, else the top folder as before (OrbisPaths.h).
   EmuFolders::Bios = OrbisDir("bios");
+  {
+    // 2026-10-08 (AI-assisted): PS5SX2/BiosFolder (gs.ini, the settings page), when it is a folder, is looked through first.
+    std::string dir = orbis_gs_ini_string("BiosFolder");
+    while (dir.size() > 1 && dir.back() == '/')
+      dir.pop_back();
+    struct stat st = {};
+    if (!dir.empty())
+    {
+      const bool ok = dir[0] == '/' && stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+      printf("[boot] BIOS folder %s (PS5SX2/BiosFolder)%s\n", dir.c_str(), ok ? "" : ": not a folder here, /data/PCSX2/bios instead");
+      if (ok)
+        EmuFolders::Bios = dir;
+      fflush(stdout);
+    }
+  }
   EmuFolders::Settings = "/data/PCSX2";
   EmuFolders::Logs = OrbisDir("logs");
   EmuFolders::MemoryCards = OrbisDir("memcards");
@@ -2440,6 +2599,19 @@ int main()
     sys_notify(fe::Tr(fe::Str::NotifyNoGame));
     orbis_exit_quietly(0);
   }
+  // 2026-10-08 (AI-assisted; testers asked for the PS2's own boot and menu): the sheet's "PS2 system menu" (fe_ps5.h
+  // kOrbisSystemMenuPath): no disc, so VMManager boots the BIOS into its menu (AutoDetectSource: an empty file name is
+  // CDVD_SourceType::NoDisc); gs.ini's settings, no game's file. Needs proper testing on the console.
+  const bool system_menu = s_game_path == kOrbisSystemMenuPath;
+  if (system_menu)
+  {
+    s_game_path.clear();
+    s_game_ini_path.clear();
+    printf("[boot] the PS2 system menu (no disc); settings: gs.ini only\n");
+    orbis_eventf("game start: the PS2 system menu (no disc) | all games (gs.ini): %s", orbis_ini_summary("/data/PCSX2/gs.ini").c_str());
+    fflush(stdout);
+  }
+  else
   {
     // vk-285-32: its settings file, named after the image without the extension.
     std::string stem = s_game_path.substr(s_game_path.rfind('/') + 1);
@@ -2449,12 +2621,14 @@ int main()
     s_game_ini_path = "/data/PCSX2/settings/" + stem + ".ini";
   }
 #ifdef ORBIS_VULKAN
-  orbis_web_now_playing(s_game_path); // vk-285-50: the page marks it and applies its changes live
+  if (!system_menu)
+    orbis_web_now_playing(s_game_path); // vk-285-50: the page marks it and applies its changes live
 #endif
-  printf("[boot] game: %s\n[boot] game settings: %s (%s)\n", s_game_path.c_str(), s_game_ini_path.c_str(),
-    access(s_game_ini_path.c_str(), F_OK) == 0 ? "found" : "none");
-  fflush(stdout);
+  if (!system_menu)
   {
+    printf("[boot] game: %s\n[boot] game settings: %s (%s)\n", s_game_path.c_str(), s_game_ini_path.c_str(),
+      access(s_game_ini_path.c_str(), F_OK) == 0 ? "found" : "none");
+    fflush(stdout);
     // Test build 1 (vk-285-55): where the image is, when it isn't in games/ (a USB drive, say).
     const std::string dir = s_game_path.substr(0, s_game_path.rfind('/'));
     const std::string from = dir == OrbisDir("games") ? std::string() : " (from " + dir + ")";
@@ -2672,6 +2846,27 @@ int main()
 
   VMBootParameters params;
   params.filename = s_game_path; // vk-285-30
+  // 2026-10-08 (AI-assisted; testers: "mount ELFs", "ELF properties: disc path"): an .elf from the shelf boots as PCSX2 boots
+  // an ELF (VMBootParameters::elf_override, always fast booted; host: is its folder when EmuCore/HostFs is on), with the disc
+  // image its settings file names (PS5SX2/ElfDisc: a file name the shelf lists, or a full path), else with no disc. Needs
+  // proper testing on the console.
+  if (s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0)
+  {
+    params.elf_override = s_game_path;
+    const std::string disc = orbis_elf_disc();
+    if (!disc.empty())
+    {
+      params.filename = disc;
+      params.source_type = CDVD_SourceType::Iso;
+    }
+    else
+    {
+      params.filename.clear();
+      params.source_type = CDVD_SourceType::NoDisc;
+    }
+    printf("[boot] ELF %s, %s\n", s_game_path.c_str(), disc.empty() ? "no disc (PS5SX2/ElfDisc not set or not found)" : ("disc " + disc).c_str());
+    fflush(stdout);
+  }
 
   // The PS5 account service uses native notifications instead of ImGui overlays.
 #ifndef PS5SX2_ACHIEVEMENTS
@@ -2835,6 +3030,8 @@ int main()
   if (res == VMBootResult::StartupSuccess)
   {
     std::string title = VMManager::GetTitle(true);
+    if (title.empty() && system_menu)
+      title = "PS2 system menu"; // 2026-10-08
     if (title.empty())
     {
       title = s_game_path.substr(s_game_path.rfind('/') + 1);
