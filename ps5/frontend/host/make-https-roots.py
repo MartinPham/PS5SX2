@@ -5,7 +5,7 @@
 #
 #   ps5/frontend/host/make-https-roots.py cacert.pem "certifi 2026.04.22" > ps5/frontend/fe_https_roots.inc
 #
-# Copyright (C) 2026 Spyros
+# Copyright (C) 2026 swordpdf
 # SPDX-License-Identifier: GPL-3.0-or-later
 import hashlib
 import re

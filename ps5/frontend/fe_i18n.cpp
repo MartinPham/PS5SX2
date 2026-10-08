@@ -1,7 +1,7 @@
 // PS5 port frontend: the shelf's and the notifications' text in the PS5's language (vk-285-110).
 // See fe_i18n.h. First translations by the port's author; testers' fixes go in /data/PCSX2/lang/<code>.txt.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_i18n.h"

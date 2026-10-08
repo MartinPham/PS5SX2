@@ -8,7 +8,7 @@
 // texture pack downloads use it (fe_ps5.cpp); the system's parts (DNS, the socket, random numbers) come from the
 // platform, so the PC preview and the tests run it too.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 

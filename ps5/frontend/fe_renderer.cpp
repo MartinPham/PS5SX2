@@ -1,6 +1,6 @@
 // PS5 port frontend: the Vulkan renderer (see fe_renderer.h).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_renderer.h"

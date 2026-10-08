@@ -383,5 +383,5 @@ Please use your own BIOS and your own games.
 ---
 
 <p align="center">
-  Made by Spyros: Discord <b>sword.pdf</b> · X <a href="https://x.com/sword_pdf">@sword_pdf</a>
+  Made by swordpdf: Discord <b>sword.pdf</b> · X <a href="https://x.com/sword_pdf">@sword_pdf</a>
 </p>

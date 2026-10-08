@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the sheet for all games'
+# vk-285-135 (AI-assisted; swordpdf: "i also want to pick a folder though the browser in the shelf"): the sheet for all games'
 # Folders rows in fe_host (SwiftShader stands in for the GPU): the picker goes into a "drive" and a folder in it, says how
 # many games are there, and "Use this folder" adds it to PS5SX2/GameFolders in gs.ini; the folder added is at the top of the
 # places and Triangle removes it; the BIOS folder is picked and Triangle on its row sets it back; an NFS share is typed on

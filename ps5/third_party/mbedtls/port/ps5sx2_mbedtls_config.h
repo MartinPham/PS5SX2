@@ -7,7 +7,7 @@
  * against the bundled Mozilla roots, and the server's name. Legacy crypto only (no PSA, no TLS 1.3, no server side).
  * Built with -DMBEDTLS_CONFIG_FILE='"ps5sx2_mbedtls_config.h"' -I<this folder>.
  *
- * Copyright (C) 2026 Spyros
+ * Copyright (C) 2026 swordpdf
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #ifndef PS5SX2_MBEDTLS_CONFIG_H

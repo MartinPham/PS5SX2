@@ -6,7 +6,7 @@
 // big reads, the end of a file, threads), the frontend's game scan and serials, writes refused, a server that isn't
 // there, and other paths untouched.
 //   ps5/coreorbis/tests/nfs/test-nfs.sh
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "OrbisNfs.h"

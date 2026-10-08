@@ -3,7 +3,7 @@
 // The files are bin/resources/shaders of the tree the eboot is built from, embedded with .incbin (as the frontend's
 // fonts are, fe_ps5.cpp), so they match the renderer's code: the same text the release's resources folder holds.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "OrbisGSShaders.h"

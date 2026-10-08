@@ -1,6 +1,6 @@
 // PS5 port frontend: the shelf's options sheet (see fe_options.h).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_options.h"
@@ -326,7 +326,7 @@ std::string JoinFolderList(const std::vector<std::string>& items)
 const std::vector<OptionGroup>& OptionGroups()
 {
 	static const std::vector<OptionGroup> groups = {
-		// vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): a game off the shelf (its own file
+		// vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): a game off the shelf (its own file
 		// only), and the switch for all games that puts hidden games back on it, dimmed, so their sheets can turn it off again.
 		// First, so neither is far down the sheet (the Folders rows come before them on the sheet for all games).
 		{"Shelf",
@@ -576,8 +576,8 @@ void OptionsSheet::BuildRows()
 	const bool settings = m_tab == kTabSettings;
 	if (settings && (m_has_preset || !m_global))
 		add(Kind::Recommended, m_global ? "Recommended for all games" : "Recommended settings");
-	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): where the games and the
-	// BIOS are, on the sheet for all games (the app runs the picker and the share list). vk-285-135b: at the top (Spyros
+	// vk-285-135 (AI-assisted; swordpdf: "i also want to pick a folder though the browser in the shelf"): where the games and the
+	// BIOS are, on the sheet for all games (the app runs the picker and the share list). vk-285-135b: at the top (swordpdf
 	// looked for them: at the bottom, under the memory cards, they were too far down).
 	if (settings && m_global && m_folder_rows)
 	{

@@ -7,7 +7,7 @@
 # Each window's eboot buckets are offsets from OrbisEEProfStart at run time; the ELF gives that function's address, so
 # bucket + elf(OrbisEEProfStart) is an ELF address, named with the ELF's symbols (llvm-nm -C). Library callers are named
 # the same way. With --by-game, windows of the same game (the report's "Game:" line) are added up, weighted by samples.
-# Copyright (C) 2026 Spyros
+# Copyright (C) 2026 swordpdf
 # SPDX-License-Identifier: GPL-3.0-or-later
 import argparse, bisect, collections, re, shutil, subprocess, sys
 

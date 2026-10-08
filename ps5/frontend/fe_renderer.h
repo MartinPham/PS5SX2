@@ -5,7 +5,7 @@
 // Written for what the PS5 driver runs: classic render passes, no MSAA (its resolve is a CPU copy),
 // no mip chains, no image queries in shaders, 16-bit indices, push constants of 128 bytes.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

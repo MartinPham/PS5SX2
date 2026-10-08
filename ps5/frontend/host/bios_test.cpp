@@ -3,7 +3,7 @@
 // that isn't a BIOS, a .zip without one, a game, folders of nothing). A "BIOS" here is a 4 MB file with RESET and ROMVER in
 // it, which is what the test's is_bios looks for (PCSX2's IsBIOS reads the ROMDIR on the console).
 //   ps5/frontend/host/test-bios.sh
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "fe_bios.h"
 

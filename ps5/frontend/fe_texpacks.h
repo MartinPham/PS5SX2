@@ -1,6 +1,6 @@
 // PS5 port frontend: HD texture packs from archive.org (2026-10-05, AI-assisted).
 //
-// Spyros: "i wanna be able to press square on a game and download the texture pack, unzip it if needed and place it on
+// swordpdf: "i wanna be able to press square on a game and download the texture pack, unzip it if needed and place it on
 // the appropriate folder, automatically", archive.org first. archive.org's "PCSX2 HD Texture Packs" item
 // (pcsx2-hd-texture-packs) holds one RAR 5 file a game, named "<title> (<region>) [<serial>] <edition>.rar", with
 // "<pack>/<serial>/replacements/..." inside (some also have the maker's dumps/ beside replacements/). Its file list
@@ -14,7 +14,7 @@
 // The platform (HTTP, free space, the popup) is behind TexturePackPlatform: fe_ps5.cpp on the console, fe_host.cpp
 // and host/texpacks_test.cpp on a PC. Needs proper testing on the console.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

@@ -1,6 +1,6 @@
 // PS5 port frontend (vk-285-134, AI-assisted): the PS2 BIOS, before a game starts. See fe_bios.h.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_bios.h"

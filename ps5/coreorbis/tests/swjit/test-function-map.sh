@@ -3,7 +3,7 @@
 #
 #   ps5/coreorbis/tests/swjit/test-function-map.sh
 #
-# Copyright (C) 2026 Spyros
+# Copyright (C) 2026 swordpdf
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)

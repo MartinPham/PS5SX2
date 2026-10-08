@@ -6,7 +6,7 @@
 // or CJK. A file <lang_dir>/<code>.txt, when present, replaces entries ("hint.play = Jugar"), so a wrong
 // word can be fixed without a new build.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

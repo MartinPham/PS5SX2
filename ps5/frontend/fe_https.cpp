@@ -1,7 +1,7 @@
 // PS5 port frontend: our own HTTPS GET client (see fe_https.h). 2026-10-05, AI-assisted; needs proper testing on the
 // console.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_https.h"

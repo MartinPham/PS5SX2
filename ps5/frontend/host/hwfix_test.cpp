@@ -5,7 +5,7 @@
 // own fixes written first, Reset all taking them out) and the page's settings answer ("gamefixes", only for a game that has
 // such fixes).
 //   ps5/frontend/host/test-hwfixes.sh
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_options.h"

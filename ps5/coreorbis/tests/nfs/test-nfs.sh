@@ -9,7 +9,7 @@
 # `go build -o osnfsstrict ./example/osnfsstrict`). Without them the test is skipped (exit 0, says so).
 # NFS_SANITIZE=address,undefined builds with the sanitizers.
 #
-# Copyright (C) 2026 Spyros
+# Copyright (C) 2026 swordpdf
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 

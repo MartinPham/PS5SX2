@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): fe_host (SwiftShader stands in for the GPU)
+# vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): fe_host (SwiftShader stands in for the GPU)
 # hides a game from its sheet (Shelf > Hide from the shelf), starts again without it, shows hidden games from the sheet for all
 # games (dimmed), takes the game's hide off again, and hides the last game (the one before it is selected). Pictures go to
 # $FE_SHOTS when it is set.

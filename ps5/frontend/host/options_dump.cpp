@@ -5,7 +5,7 @@
 //   I <key> | <label> | <default> | <restart> | <value>=<label>, ...
 // The sheet's button symbols ("<glyph>  Cross") are left out of the labels; the hints may differ (the sheet's are shorter).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../fe_options.h"

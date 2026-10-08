@@ -3,7 +3,7 @@
 // PS3 app's. What it changes goes into the same files the page writes (settings/<image>.ini for one game, gs.ini for
 // all of them), through the same code (fe_settings.cpp), and into logs/settings.log.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
@@ -74,7 +74,7 @@ struct OptionsPaths
 constexpr const char* kElfDiscKey = "PS5SX2/ElfDisc";
 constexpr const char* kCheatDiscKey = "PS5SX2/CheatDisc"; // vk-285-139: gs.ini, a disc image the shelf lists
 
-// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the folders main-boot.cpp
+// vk-285-135 (AI-assisted; swordpdf: "i also want to pick a folder though the browser in the shelf"): the folders main-boot.cpp
 // reads when PS5SX2 starts, in gs.ini, set from the sheet for all games (the app's folder picker) as from the settings page.
 constexpr const char* kGameFoldersKey = "PS5SX2/GameFolders"; // folders separated by ';'
 constexpr const char* kBiosFolderKey = "PS5SX2/BiosFolder";

@@ -3,7 +3,7 @@
 // or a download -- decodes it and picks the glow colour from it. The main thread polls the results
 // and turns them into textures.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

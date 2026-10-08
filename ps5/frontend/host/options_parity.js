@@ -2,7 +2,7 @@
 // lines options_dump.cpp writes for the shelf's sheet (see there). The page's text fields (Textures folder) have no row
 // on the sheet: left out.
 //   node options_parity.js <index.html>
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 "use strict";
 const fs = require("fs");

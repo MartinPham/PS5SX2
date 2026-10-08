@@ -4,7 +4,7 @@
 // own libSceHttp2 (before the jailbreak) and HD texture packs with our own (fe_https.h). Everything
 // is torn down again before PCSX2 opens its device, VideoOut and audio.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_ps5.h"
@@ -936,7 +936,7 @@ int AddUsbListGames(const std::string& path, std::vector<GameInfo>& games)
 }
 } // namespace
 
-// 2026-10-05 (AI-assisted): the PS5's own keyboard for the account panel (libSceImeDialog), Spyros: "use the shell
+// 2026-10-05 (AI-assisted): the PS5's own keyboard for the account panel (libSceImeDialog), swordpdf: "use the shell
 // keyboard". The parameter block is the PS4 SDK's SceImeDialogParam as shadPS4's reimplementation lays it out (96 bytes);
 // its checks there: a password needs the BasicLatin type, the reserved bytes must be zero, the position is in 1920x1080.
 // This process may not load the library itself: firmware 11.40 refuses libSceNotification, libSceKeyboard and libSceMouse
@@ -1653,7 +1653,7 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		if (games[i].file == last)
 			preselect = static_cast<int>(i);
 	// vk-285-69: one game opens the shelf too, not the game straight away: the shelf's QR code is how
-	// testers reach the settings page and its Download logs (Spyros, 2026-09-26).
+	// testers reach the settings page and its Download logs (swordpdf, 2026-09-26).
 
 	int32_t user = -1;
 	(void)sceUserServiceInitialize(nullptr);

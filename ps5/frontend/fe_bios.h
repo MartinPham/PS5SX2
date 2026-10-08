@@ -6,7 +6,7 @@
 // BIOS by itself (BiosTools.cpp; on the PS5 also in the BIOS folder's folders, /data/PCSX2 and the drives); these helpers
 // take a BIOS out of an archive into the BIOS folder, and say in a sentence what was found instead, for the shelf.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

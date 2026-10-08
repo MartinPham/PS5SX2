@@ -3,7 +3,7 @@
 // memcards/, the games' patch groups and the recommended settings (assets/presets.ini). Moved here from fe_web.cpp
 // unchanged; the editing, card and recommended helpers at the end are the page's own steps, for the sheet.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

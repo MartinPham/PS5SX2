@@ -4,7 +4,7 @@
 //
 //   texpacks_test <fixtures dir> <work dir> [<a real pack .rar> <its serial>]
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_settings.h"

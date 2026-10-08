@@ -6,7 +6,7 @@
 //   settings_test <folder> nosettings  vk-285-121: both save into a missing settings/ folder (this tree only)
 // The files must match line for line apart from comment lines (each side names itself in the file's first line).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../fe_web.h"

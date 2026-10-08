@@ -3,7 +3,7 @@
 // subcode, plain 2048), and leaves out a .bin under 16 MB (a BIOS dump, a memory card) and one with no ISO 9660 volume
 // (the audio tracks of a .cue/.bin set).
 //   ps5/frontend/host/test-rawbin.sh
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "fe_games.h"
 #include <cstdio>

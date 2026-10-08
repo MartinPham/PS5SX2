@@ -153,7 +153,7 @@ namespace GSTextureReplacements
 
 #ifdef ORBIS_VULKAN
 // PS5 port (vk-285-111): what the texture replacements do, in boot.log. A pack in the right folder with the
-// right names (Spyros's Ratchet & Clank one, PNG) showed no sign of loading, and PCSX2 itself says what it
+// right names (swordpdf's Ratchet & Clank one, PNG) showed no sign of loading, and PCSX2 itself says what it
 // found only in debug builds. These lines say how many files the scan found, whether the game's textures
 // match them (and, for a miss whose texture hash is in the pack, which part of the name differs), and
 // whether the files load and reach the GPU. Diagnostics only; needs proper testing.
@@ -197,7 +197,7 @@ namespace
 
 	// vk-285-112: the decoded copies s_replacement_texture_cache keeps, in bytes (under its mutex). PCSX2 keeps
 	// every loaded replacement in memory until the game changes; the PS5 app has ~150 MB of heap left while a game
-	// runs, and one 2048x2048 replacement is 16 MB (Spyros's R&C pack has dozens). Past this budget a copy is
+	// runs, and one 2048x2048 replacement is 16 MB (swordpdf's R&C pack has dozens). Past this budget a copy is
 	// dropped once it's on the GPU, and a texture the hash cache lets go is read from its file again when the game
 	// uses it next. Needs proper testing.
 	size_t s_orbis_cache_bytes = 0;

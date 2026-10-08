@@ -3,7 +3,7 @@
 // changing a fix (or turning manual fixes on) for a game writes UserHacks=true and the game's own fixes too, as the shelf's
 // sheet does. Runs the page's GROUPS, effective(), manualFixesOn() and change() in node, without a browser.
 //   node hwfix_page_test.js <index.html>
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 "use strict";
 const fs = require("fs"), vm = require("vm"), assert = require("assert");

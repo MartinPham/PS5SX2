@@ -1,6 +1,6 @@
 // PS5 port frontend: a game's patches and cheats from the internet (2026-10-08, AI-assisted). See fe_patchdl.h.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_patchdl.h"

@@ -4,7 +4,7 @@
 //   https_test real                   archive.org, through $https_proxy's CONNECT when it is set (the PC's preview VM)
 //   https_test units                  URL parsing, redirects' addresses, the calendar conversion
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_https.h"

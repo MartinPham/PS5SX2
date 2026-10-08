@@ -2,7 +2,7 @@
 // PS5 port frontend: signed-distance-field glyphs (params.w = 0: x = edge, y = softness in field
 // units) and rounded rectangles (params.w = 1: uv = pixels from the centre, x/y = half size,
 // z = corner radius, softness one pixel).
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 layout(set = 1, binding = 0) uniform sampler2D u_atlas;

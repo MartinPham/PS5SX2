@@ -7,7 +7,7 @@
 // Plain BSD sockets, one thread, one request per connection; the same code runs on the PC in
 // fe_host for testing. Every /api/ request uses the same-site checks; the console address is sufficient.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

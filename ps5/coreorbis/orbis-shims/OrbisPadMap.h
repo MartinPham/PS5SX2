@@ -84,7 +84,7 @@ struct SourceInfo
 // ScePad's bits, as orbis_pad_apply always read them. The touchpad's click is 0x00100000; 0x40000000 is the keyboard's
 // Select (Backspace, orbis-shims/ProsperoKbdMap.h PAD_SELECT). vk-285-122 (AI-assisted): ScePad's 0x1, the DualSense's
 // Create button (the old Share, left of the touchpad), presses nothing -- it pressed Select with the touchpad's click
-// until now (Spyros: "unbind select from the share button").
+// until now (swordpdf: "unbind select from the share button").
 inline const SourceInfo& SourceAt(int s)
 {
 	static const SourceInfo k[S_COUNT] = {

@@ -1,6 +1,6 @@
 // PS5 port frontend: the console side (fe_ps5.cpp).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

@@ -17,7 +17,7 @@
 // server; every other path, and every FILE or descriptor that isn't one of its own, goes to the real call unchanged.
 // Read-only: writing on a share fails with EROFS.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once

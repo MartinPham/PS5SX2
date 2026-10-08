@@ -1,5 +1,5 @@
 // PS5SX2 (vk-285-133, AI-assisted): frame generation's pacing, counted in the PS2's own vsyncs.
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // vk-285-131 measured the game's frame interval on the wall clock, between presents. At 60 Hz that fed itself: once a
@@ -25,7 +25,7 @@
 // limiter isn't at normal speed (turbo, slow motion, the fast boot). Header-only, so a PC test runs it (tests/fgpacing).
 //
 // vk-285-135: and only while the game's frame rate is steady: 7 of the last 8 intervals the same length to start, 6 to go on.
-// Spyros on vk-285-134d, Ratchet & Clank where its frames take 1 or 2 vsyncs (45-58 fps): "it felt like actually worse
+// swordpdf on vk-285-134d, Ratchet & Clank where its frames take 1 or 2 vsyncs (45-58 fps): "it felt like actually worse
 // than 50". One generated frame before each of the game's on frames of uneven length makes the motion speed up and slow
 // down from refresh to refresh, on top of the in-between frames' artifacts and the frame of lag; an even rate (60 to 120,
 // 30 to 60) is what it doubles well. Uneven stretches show the game's own frames.

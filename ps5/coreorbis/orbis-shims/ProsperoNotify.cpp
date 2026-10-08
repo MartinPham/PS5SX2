@@ -137,7 +137,7 @@ namespace
 		std::condition_variable wake;
 		std::deque<Request> queue; // under lock
 		bool thread_started = false; // under lock
-		// 2026-10-05 (AI-assisted): the pacing of rich toasts (Worker). Spyros: the first two toasts of a game (the
+		// 2026-10-05 (AI-assisted): the pacing of rich toasts (Worker). swordpdf: the first two toasts of a game (the
 		// RetroAchievements login, then its game summary 3.1 s later, a second into the game) showed no picture, while the
 		// same JSON with the same cached PNG showed it later from a test payload, in both channels, 7 s apart, as unlock
 		// toasts mid-game do. So a rich toast waits until the hold set at the game's start has passed (OrbisNotifyHold)

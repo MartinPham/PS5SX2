@@ -425,7 +425,7 @@ bool OrbisFlag(const char* name);
 // games above read back 2 to 3.4 times a frame.
 std::atomic<int> g_orbis_rb_auto_kind{0}; // 1: each wait 10 ms or more (old firmware), 2: many short waits (main-boot.cpp)
 // vk-285-128 (AI-assisted): games that build textures from what they read back. With GPU readbacks on Don't wait
-// TimeSplitters: Future Perfect's textures didn't load and its input lagged (Spyros's Pro, 2026-10-04, set by hand): it
+// TimeSplitters: Future Perfect's textures didn't load and its input lagged (swordpdf's Pro, 2026-10-04, set by hand): it
 // reads back once a frame, 5-14 ms each at 6x on the Pro, so a slower console or a heavier scene could trip the rule
 // below and switch it. These games keep Accurate unless their own file or gs.ini says otherwise.
 static bool OrbisReadbackMustWait(std::string* name)
@@ -886,7 +886,7 @@ static void OrbisLiveTune()
 		s_seen_cycle = cyc;
 		OrbisApplyMode(s_orbis_mode + 1, true);
 	}
-	// vk-285-135 (Spyros: "applying a filter live through the browser ui only applies it for a sec and then switches back
+	// vk-285-135 (swordpdf: "applying a filter live through the browser ui only applies it for a sec and then switches back
 	// to what was on before that. it only gets applied if i restart the game"): the page's Display filter is TVShader in
 	// gs.ini or the game's settings. VMManager::ApplySettings gives this thread a new GSConfig with it, and the live.ini
 	// re-apply that follows (g_orbis_live_reapply) put the old present mode back, its TVShader and pre-sharpen with it.
@@ -1678,7 +1678,7 @@ static void OrbisGLOSD(bool generated = false)
 			s_orbis_label_frames--;
 		snprintf(text, sizeof(text), "%s", s_orbis_modes[s_orbis_mode].name);
 	}
-	// vk-285-135 (Spyros: "frame gen doesnt get me to 120 in any game, it actually gets me less fps than normal"): while frames are
+	// vk-285-135 (swordpdf: "frame gen doesnt get me to 120 in any game, it actually gets me less fps than normal"): while frames are
 	// generated, the box counts what the TV gets, the generated frames with the game's: it counted the game's only, and with
 	// frame generation's skip of the game's repeated frames (a 50 fps stretch of Ratchet & Clank shows its 50, not the 60
 	// vsyncs a repeat fills) that read as fewer frames than without it. The game's own count follows in brackets.

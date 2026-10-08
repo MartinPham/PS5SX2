@@ -1635,7 +1635,7 @@ static std::string orbis_build_label()
   return "Test build " + std::to_string(g_orbis_test_build) + " \xC2\xB7 " ORBIS_BUILD_TAG;
 }
 
-// vk-285-105 (Spyros): testing builds point at the testers' Discord, in smaller text under the build
+// vk-285-105 (swordpdf): testing builds point at the testers' Discord, in smaller text under the build
 // on the shelf and over the game. Empty in a normal build.
 static std::string orbis_test_note()
 {
@@ -2067,7 +2067,7 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
   fe.settings_log = OrbisLogPath("settings.log"); // vk-285-51
   // 2026-10-05: HD texture packs from archive.org, in the folder PCSX2 reads them from (EmuFolders::Textures, set below
   // to /data/PCSX2/textures). Not OrbisDir("textures"): that answers /data/PCSX2 itself when the folder isn't there yet
-  // (Spyros's PS5 had none), and pr9h installed a pack as /data/PCSX2/<serial> where no game looks. The manager makes
+  // (swordpdf's PS5 had none), and pr9h installed a pack as /data/PCSX2/<serial> where no game looks. The manager makes
   // the folder when it first needs it.
   fe.textures_dir = "/data/PCSX2/textures";
   fe.texture_pack_list = OrbisDir("cache") + "/texture-packs.json";
@@ -2540,7 +2540,7 @@ static void orbis_vk_environment()
   // 3x and 6x ("4K") needs 7680.
   // vk-285-66: 16384 with the flag file vk_16k, so PCSX2 offers 8x (16384 / 1280 = 12.8; at 8192 it
   // stops at 6x). The descriptor and target size fields hold 14 bits (the driver's ps5vk_max_extent_2d).
-  // vk-285-134d (Spyros: "also have a selectable option for 8x native"): 16384 by default, so the Resolution row's 8x
+  // vk-285-134d (swordpdf: "also have a selectable option for 8x native"): 16384 by default, so the Resolution row's 8x
   // applies (vk-285-66 ran R&C at 8x and 60 fps with it, and the 12 GiB heap it wants is the default since); the flag
   // file vk_8k keeps 8192 (PCSX2 then stops at 6x).
   if (hw) setenv("PS5VK_MAX_EXTENT_2D", orbis_flag("vk_8k") ? "8192" : "16384", 0);
@@ -3066,7 +3066,7 @@ int main()
     s_base_si.SetStringValue("USB2", "Type", "hidmouse");
   }
   printf("[boot] USB keyboard and mouse %s\n", orbis_flag("nousbkbm") ? "off (flag nousbkbm)" : "on ports 1 and 2");
-  // 2026-10-05 (AI-assisted; Spyros: the network adapter on for every game, after a tester went online in Resident Evil
+  // 2026-10-05 (AI-assisted; swordpdf: the network adapter on for every game, after a tester went online in Resident Evil
   // Outbreak with SOCOM II's lines): the PS2's network adapter as SOCOM II's file sets it (claude/socom2-online.md):
   // PCSX2's sockets backend on the console's own connection, its DHCP server giving the game an address, and the DNS the
   // PS5 uses (pcsx2/DEV9/AdapterUtils.cpp GetDNS). DEV9's receive thread starts only once a game sends (net.cpp), so games

@@ -1,6 +1,6 @@
 // PS5 port (vk-285-135, AI-assisted): games on NFS shares, through libnfs. See OrbisNfs.h.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "OrbisNfs.h"

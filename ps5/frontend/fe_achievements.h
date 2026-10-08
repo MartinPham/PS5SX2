@@ -1,5 +1,5 @@
 // Controller-operated account panel, independent of the emulator/runtime (AI-assisted).
-// 2026-10-05: redesigned (Spyros: "it now looks trash. use the shell keyboard and make the ui for the inputs match our
+// 2026-10-05: redesigned (swordpdf: "it now looks trash. use the shell keyboard and make the ui for the inputs match our
 // current ui"): the fields open the PS5's own keyboard when the app can (TextEntryService, fe_ps5.cpp); otherwise the
 // panel's keyboard, now in pages (letters, capitals, symbols) with a row of Shift, symbols, Space, Delete and Done.
 // SPDX-License-Identifier: GPL-3.0-or-later

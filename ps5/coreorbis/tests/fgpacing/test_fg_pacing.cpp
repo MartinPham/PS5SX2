@@ -1,6 +1,6 @@
 // PS5SX2 (vk-285-133, AI-assisted): a check of frame generation's pacing (orbis-shims/OrbisFrameGenPacing.h) on a PC.
 //   g++ -std=c++17 -Wall -Wextra -I../../orbis-shims -o /tmp/test_fg_pacing test_fg_pacing.cpp && /tmp/test_fg_pacing
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "OrbisFrameGenPacing.h"
 

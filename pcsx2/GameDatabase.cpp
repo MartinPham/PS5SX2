@@ -1129,12 +1129,12 @@ struct OrbisGameFixAddition
 };
 
 constexpr OrbisGameFixAddition kOrbisGameFixAdditions[] = {
-	// GTA Liberty City Stories with its 60 FPS patch at 6x (Spyros's Pro, 2026-10-03): event tests 1.9 M -> 0.13 M a
+	// GTA Liberty City Stories with its 60 FPS patch at 6x (swordpdf's Pro, 2026-10-03): event tests 1.9 M -> 0.13 M a
 	// second, the EE thread 100% -> 80% busy at the same view; with vk-285-124's GIF path wait 47-53 fps became 58-60.
 	// Minutes of driving showed nothing wrong. The US release only; the EU (SLES-54135/54136) and JP (SLPM-66851,
 	// SLPM-55038) ones are untested.
 	{"SLUS-21423", "Grand Theft Auto - Liberty City Stories", Fix_InstantDMA},
-	// vk-285-128: San Andreas and Vice City (US) with their 60 FPS patches (Spyros's Pro, 2026-10-04), Instant DMA in
+	// vk-285-128: San Andreas and Vice City (US) with their 60 FPS patches (swordpdf's Pro, 2026-10-04), Instant DMA in
 	// their settings files: San Andreas's event tests 877 k -> 277 k a second; both held 60 with the EE overclocked
 	// (San Andreas EE Cycle Rate 2, Vice City 3 with vk-285-126) and showed nothing wrong in their sessions. EU/JP untested.
 	{"SLUS-20946", "Grand Theft Auto - San Andreas", Fix_InstantDMA},
@@ -1154,7 +1154,7 @@ struct OrbisGameDbAlias
 constexpr OrbisGameDbAlias kOrbisGameDbAliases[] = {
 	// Dragon Ball Z Budokai Tenkaichi 4, a fan mod of Budokai Tenkaichi 3 ("BT4 Beta 14 REV2 ENG", CRC 428113C2). Without
 	// BT3's fixes (half pixel offset 5, native scaling 4, the OI_DBZBTGames draw hook) Vegeta's shadow sat off at 6x and
-	// was right at 1x (Spyros's Pro, 2026-10-04); with the first two in its settings file it was right at 6x.
+	// was right at 1x (swordpdf's Pro, 2026-10-04); with the first two in its settings file it was right at 6x.
 	{"SLUS-21978", "SLUS-21678", "Dragon Ball Z - Budokai Tenkaichi 4 (fan mod of Budokai Tenkaichi 3)"},
 };
 

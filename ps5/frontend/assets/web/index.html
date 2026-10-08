@@ -9,7 +9,7 @@
 <!--
   PS5SX2's settings page (vk-285-50; Recommended button vk-285-51), served by the console itself
   (frontend/fe_web.cpp).
-  Copyright (C) 2026 Spyros. SPDX-License-Identifier: GPL-3.0-or-later.
+  Copyright (C) 2026 swordpdf. SPDX-License-Identifier: GPL-3.0-or-later.
   The Discord and X icons are Font Awesome Free 7.3.1 (CC BY 4.0, https://fontawesome.com);
   the logos are their owners' trademarks and only point to the author's accounts.
 -->
@@ -271,7 +271,7 @@ footer a { color: var(--dim); }
   </main>
 
   <footer>
-    <div><b style="color:var(--dim)">PS5SX2</b> · PCSX2 for jailbroken PS5 · by Spyros · <span id="build"></span></div>
+    <div><b style="color:var(--dim)">PS5SX2</b> · PCSX2 for jailbroken PS5 · by swordpdf · <span id="build"></span></div>
     <div>Based on PCSX2 (GPL-3.0-or-later). Not affiliated with or endorsed by the PCSX2 team or Sony Interactive Entertainment.</div>
     <div>Icons: Font Awesome Free (CC BY 4.0). Covers: xlenore/ps2-covers.</div>
   </footer>
@@ -312,7 +312,7 @@ const GROUPS = [
   // 2026-10-08 (AI-assisted; testers: "have users select their bios and games scan path ... ext/usb or m2"): where the shelf
   // finds games and the BIOS besides /data/PCSX2 and the drives it looks through by itself (USB 0-7, extended storage and
   // M.2: /mnt/ext0, /mnt/ext1). For all games only (main-boot.cpp reads gs.ini when PS5SX2 starts). vk-285-135b: the Settings
-  // tab's first group, as on the shelf's sheet (Spyros looked for them at the bottom); the sheet picks these folders with its
+  // tab's first group, as on the shelf's sheet (swordpdf looked for them at the bottom); the sheet picks these folders with its
   // own picker (fe_app.cpp), the overlays folder is typed here only.
   { title: "Folders", global: true, items: [
     { key: "PS5SX2/GameFolders", label: "More game folders", type: "text", def: "", restart: true, later: "the game folders",
@@ -330,7 +330,7 @@ const GROUPS = [
       placeholder: "/mnt/ext1/PS2/bios",
       hint: "Where to look for the BIOS first. Without it: /data/PCSX2/bios, then /data/PCSX2 and the drives' bios/ and PCSX2/bios/ folders. Read when PS5SX2 starts." },
   ]},
-  // vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): a game off the shelf (its own file only;
+  // vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): a game off the shelf (its own file only;
   // fe_games.cpp ReadBadges), and the switch for all games that puts hidden games back on it, dimmed. The sheet has the
   // same two groups (fe_options.cpp); from here they apply the next time the shelf opens.
   { title: "Shelf", game: true, items: [

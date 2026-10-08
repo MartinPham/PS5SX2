@@ -2,7 +2,7 @@
  * PS5 port: what ps5sx2_mbedtls_config.h asks mbedTLS's users to supply (2026-10-05, AI-assisted). The PS5's libc
  * exports neither gmtime_r nor explicit_bzero, and gmtime would share one buffer between threads.
  *
- * Copyright (C) 2026 Spyros
+ * Copyright (C) 2026 swordpdf
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "mbedtls/build_info.h"

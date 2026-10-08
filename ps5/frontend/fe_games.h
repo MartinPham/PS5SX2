@@ -2,7 +2,7 @@
 // their serials (read from the disc's SYSTEM.CNF),
 // display titles made from Redump-style file names, and badges from the game's settings.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
@@ -28,7 +28,7 @@ struct GameInfo
 	// vk-285-134 (AI-assisted): why the image can't be read ("invalid data": a CHD libchdr can't open, damaged or cut short;
 	// build 130's logs: 10 such starts on 4 consoles); empty when it reads. The shelf marks it and won't start it.
 	std::string damaged;
-	// vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): PS5SX2/HideGame=true in its own settings
+	// vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): PS5SX2/HideGame=true in its own settings
 	// file (ReadBadges). The shelf leaves it out unless gs.ini's PS5SX2/ShowHiddenGames is on, and then shows it dimmed.
 	bool hidden = false;
 };

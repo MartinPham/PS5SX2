@@ -1,7 +1,7 @@
 // PS5 port frontend: the cover-flow shelf itself: input, animation and the frame it draws.
 // Platform code owns the Vulkan device and the display; it calls Update and Build once a frame.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #pragma once
@@ -107,7 +107,7 @@ private:
 	};
 
 	bool Step(int dir); // true when the selection moved
-	// vk-285-137 (AI-assisted; Spyros: "add an option to hide games from the shelf"): m_games is the shelf; a game whose
+	// vk-285-137 (AI-assisted; swordpdf: "add an option to hide games from the shelf"): m_games is the shelf; a game whose
 	// settings hide it (GameInfo::hidden) waits in m_shelved, with its slot (its covers keep coming), unless Show hidden
 	// games (gs.ini) is on. m_index[i] is m_games[i]'s index in the list Init got, which the cover service and the caller use.
 	// ApplyHidden sorts the games back into the two, keeps `keep` (such an index) selected or else the next game on the
@@ -132,7 +132,7 @@ private:
 	std::string TexturePackHelp(const TexturePackStatus& s, int pick, const std::string& serial) const;
 	void BuildTexturePackActivity(std::vector<UiVertex>& ui, float x, float y, float k, uint32_t accent);
 	void PollCovers();
-	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the folder picker of the
+	// vk-285-135 (AI-assisted; swordpdf: "i also want to pick a folder though the browser in the shelf"): the folder picker of the
 	// sheet's Folders rows (game folders, the BIOS folder) and the NFS share list, in the sheet's place while it is open.
 	struct PickerItem
 	{

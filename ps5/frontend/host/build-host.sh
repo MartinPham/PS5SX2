@@ -8,7 +8,7 @@
 # Needs clang++ (18 or later), zlib's headers and the machine's libvulkan.so.1; SwiftShader (from a Chromium build)
 # stands in for a GPU.
 #
-# Copyright (C) 2026 Spyros
+# Copyright (C) 2026 swordpdf
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 

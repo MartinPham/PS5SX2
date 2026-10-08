@@ -23,7 +23,7 @@
 //   game <n>               (before any other step) the shelf starts on game n
 // Buttons: left right up down cross circle square triangle options l1 r1 l2 r2; "a+b" presses them together.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "../fe_app.h"

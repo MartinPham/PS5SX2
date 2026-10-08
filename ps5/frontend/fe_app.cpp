@@ -1,6 +1,6 @@
 // PS5 port frontend: the cover-flow shelf (see fe_app.h).
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_app.h"
@@ -1815,7 +1815,7 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 	Fonts::AddRoundedRect(ui, x, y, sw, sh, 42 * k, Rgba(0.045f, 0.050f, 0.105f, 0.985f)); // the shelf's text must not show through
 
 	const float cx = x + 64 * k, inner = sw - 128 * k;
-	// 2026-10-05 (AI-assisted; Spyros: "the square ui in general is a little cramped"): a wider sheet, and its top in two
+	// 2026-10-05 (AI-assisted; swordpdf: "the square ui in general is a little cramped"): a wider sheet, and its top in two
 	// lines that each have room: the title with this game / all games (L1 / R1) on the right, then the tabs (L2 / R2) as one
 	// strip across the sheet, the shown tab a white pill as the shown scope. vk-285-117's title kept its line to itself;
 	// the strip below now holds the three tabs that used to share a line with the scope.
@@ -2075,7 +2075,7 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 	FadeRange(ui, begin, ui.size(), Clamp(e * 1.4f, 0.0f, 1.0f));
 }
 // ---- vk-285-135: the sheet's folder picker and NFS share list (AI-assisted) ------------------------------------------
-// Spyros: "also where is the option to select what dir is set for games and bios?", "i also want to pick a folder though the
+// swordpdf: "also where is the option to select what dir is set for games and bios?", "i also want to pick a folder though the
 // browser in the shelf". The sheet for all games' Folders rows open it in the sheet's place: the places first (the folders
 // added already, /data/PCSX2, the drives, the NFS shares), then a folder's folders, "Use this folder" at the top with the
 // games found there. The choice goes into gs.ini (the sheet's own file), which main-boot.cpp reads when PS5SX2 starts.
@@ -2558,7 +2558,7 @@ void App::BuildPicker(std::vector<UiVertex>& ui, float x, float sw, float y, flo
 }
 
 // ---- 2026-10-05: the RetroAchievements account panel (L1 + Square), redesigned (AI-assisted) -------------------------
-// Spyros: "we gotta redesign the ra login screen, it now looks trash. use the shell keyboard and make the ui for the inputs
+// swordpdf: "we gotta redesign the ra login screen, it now looks trash. use the shell keyboard and make the ui for the inputs
 // match our current ui". The panel now has the options sheet's look: a centred panel with its shadow, edge and body over a
 // dimmed shelf, the fields drawn as the sheet's rows (the focused one lit, the cover's colour at its edge), and a white
 // pill for the button in focus. Cross on a field opens the PS5's own keyboard (TextEntryService) or, where the app can't

@@ -3,7 +3,7 @@
 // goes, that a file this app didn't write is never replaced, that one it wrote is replaced when its source changes, and the
 // sheet's Cheats rows (on, off, EmuCore/EnableCheats with them).
 //   ps5/frontend/host/test-patchdl.sh
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_options.h"

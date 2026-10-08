@@ -1,7 +1,7 @@
 // PS5 port frontend: the settings files (see fe_settings.h). The first part is fe_web.cpp's code as it was (vk-285-113),
 // moved here unchanged so the shelf's options sheet uses the same reader and writer as the settings page.
 //
-// Copyright (C) 2026 Spyros
+// Copyright (C) 2026 swordpdf
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "fe_settings.h"
