@@ -772,6 +772,12 @@ namespace
 	};
 	constexpr int ORBIS_NUM_MODES = static_cast<int>(sizeof(s_orbis_modes) / sizeof(s_orbis_modes[0]));
 	int s_orbis_mode = 0;
+	// vk-285-135: what OrbisApplyMode last put in GSConfig. A GSConfig that holds something else was replaced by the
+	// settings (VMManager::ApplySettings after a change on the settings page): the mode then follows their TVShader.
+	int s_orbis_applied_tv = -1;
+	bool s_orbis_applied_sb = false;
+	u8 s_orbis_applied_sat = 0;
+	int s_orbis_settings_tv = -1; // the settings' own TVShader, as the last GSConfig from them had it
 	int s_orbis_label_frames = 0;
 	bool s_orbis_fps_box = true;
 	bool s_orbis_gl = false;
@@ -813,11 +819,25 @@ static void OrbisApplyMode(int m, bool announce)
 		GSConfig.ShadeBoost = false;
 #endif
 	g_orbis_present_param[0] = static_cast<float>(pm.sharp) / 100.0f;
+	s_orbis_applied_tv = static_cast<int>(GSConfig.TVShader);
+	s_orbis_applied_sb = GSConfig.ShadeBoost;
+	s_orbis_applied_sat = GSConfig.ShadeBoost_Saturation;
 	if (announce)
 		s_orbis_label_frames = 120;
 	printf("[present] mode=%d %s tv=%d presharp=%d sharp=%d split=%.0f aspect=%d\n", m, pm.name, pm.tv_shader,
 		pm.presharp, pm.sharp, g_orbis_present_param[1], static_cast<int>(EmuConfig.CurrentAspectRatio));
 	fflush(stdout);
+}
+
+// vk-285-135: the present mode with this display filter (TVShader), or -1.
+static int OrbisModeOfTvShader(int tv_shader)
+{
+	for (int i = 0; i < ORBIS_NUM_MODES; i++)
+	{
+		if (s_orbis_modes[i].tv_shader == tv_shader)
+			return i;
+	}
+	return -1;
 }
 
 static void OrbisLiveTune()
@@ -849,6 +869,7 @@ static void OrbisLiveTune()
 				break;
 			}
 		}
+		s_orbis_settings_tv = static_cast<int>(GSConfig.TVShader); // vk-285-135
 		s_orbis_fps_box = !OrbisFlag("nofps");
 #ifdef ORBIS_VULKAN
 		// vk-285-12: on Vulkan the driver's queue submit waits for the GPU, so GPU time is
@@ -864,6 +885,38 @@ static void OrbisLiveTune()
 	{
 		s_seen_cycle = cyc;
 		OrbisApplyMode(s_orbis_mode + 1, true);
+	}
+	// vk-285-135 (Spyros: "applying a filter live through the browser ui only applies it for a sec and then switches back
+	// to what was on before that. it only gets applied if i restart the game"): the page's Display filter is TVShader in
+	// gs.ini or the game's settings. VMManager::ApplySettings gives this thread a new GSConfig with it, and the live.ini
+	// re-apply that follows (g_orbis_live_reapply) put the old present mode back, its TVShader and pre-sharpen with it.
+	// Now a GSConfig that doesn't hold what the present mode set is a new one from the settings, whenever it lands: when
+	// its TVShader is a new one, the mode follows it; else (another setting changed) the mode stays, a filter picked with
+	// L3+R3 too. Either way the mode's pre-sharpen (the ShadeBoost slot, which the settings reset) comes back. A TVShader
+	// no mode has (set in an ini by hand) is left as it is.
+	if (static_cast<int>(GSConfig.TVShader) != s_orbis_applied_tv || GSConfig.ShadeBoost != s_orbis_applied_sb ||
+		GSConfig.ShadeBoost_Saturation != s_orbis_applied_sat)
+	{
+		const int tv = static_cast<int>(GSConfig.TVShader);
+		int m = s_orbis_mode;
+		if (tv != s_orbis_settings_tv)
+		{
+			s_orbis_settings_tv = tv;
+			m = OrbisModeOfTvShader(tv);
+			if (m >= 0)
+			{
+				printf("[present] the settings changed the display filter: TVShader %d\n", tv);
+				fflush(stdout);
+			}
+		}
+		if (m >= 0)
+			OrbisApplyMode(m, false);
+		else
+		{
+			s_orbis_applied_tv = tv;
+			s_orbis_applied_sb = GSConfig.ShadeBoost;
+			s_orbis_applied_sat = GSConfig.ShadeBoost_Saturation;
+		}
 	}
 
 	static unsigned s_poll = 0;
@@ -917,14 +970,15 @@ static void OrbisLiveTune()
 	}
 	static std::string s_last;
 	std::string cur;
-	if (g_orbis_live_reapply.exchange(0, std::memory_order_acq_rel))
-		s_last = "\x01"; // eerec-285: gs.ini was applied, so apply live.ini again (present mode, pin)
+	// eerec-285: gs.ini was applied, so apply live.ini again (present mode, pin).
+	const bool reapply = g_orbis_live_reapply.exchange(0, std::memory_order_acq_rel) != 0;
 	{
 		std::string b; // vk-285-105: as the ticker last read it (see gs.ini above)
 		if (OrbisCachedRead("/data/PCSX2/live.ini", b))
 			cur.assign(b, 0, std::min<size_t>(b.size(), 1024));
 	}
-	if (cur == s_last)
+	const bool changed = cur != s_last;
+	if (!changed && !reapply)
 		return;
 	s_last = cur;
 	int mode = -1;
@@ -1003,6 +1057,10 @@ static void OrbisLiveTune()
 		static_cast<int>(GSConfig.InterlaceMode), static_cast<int>(GSConfig.FXAA), static_cast<int>(GSConfig.PCRTCAntiBlur));
 	printf("[present] swtex=%d testpat=%d upload=%d diag=%d perf=%d\n", g_orbis_swtex, g_orbis_testpat, g_orbis_upload_mode,
 		g_orbis_diag, g_orbis_perf); // eerec-280
+	// vk-285-135: live.ini's mode= counts when live.ini itself changed; re-applied after the settings (live.ini as it was),
+	// a mode= in it would undo the page's display filter. The current mode follows the settings (above).
+	if (!changed)
+		mode = -1;
 	OrbisApplyMode(mode >= 0 ? mode : s_orbis_mode, mode >= 0);
 }
 
