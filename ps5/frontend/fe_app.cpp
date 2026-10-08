@@ -7,8 +7,11 @@
 #include "fe_i18n.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <dirent.h>
+#include <sys/stat.h>
 
 extern "C" {
 #include "third_party/qrcodegen/qrcodegen.h"
@@ -956,6 +959,8 @@ void App::OpenSheet(bool global)
 	m_sheet.SetTexturePackRow(static_cast<bool>(m_cfg.texture_packs)); // 2026-10-05
 	m_sheet.SetOnlinePatchRow(static_cast<bool>(m_cfg.online_patches)); // 2026-10-08
 	m_sheet.SetSystemMenuRow(m_cfg.system_menu);                        // 2026-10-08
+	m_sheet.SetFolderRows(!m_cfg.folder_places.empty());                // vk-285-135
+	m_picker.open = false;
 	OptionsPaths paths = m_cfg.options;
 	if (g && IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images
 		for (const GameInfo& other : m_games)
@@ -1017,6 +1022,7 @@ void App::CloseSheet()
 	if (!m_sheet_open)
 		return;
 	m_sheet_open = false;
+	m_picker.open = false; // vk-285-135
 	if (m_cfg.game_achievements.cancel)
 		m_cfg.game_achievements.cancel();
 	if (m_sheet.saved() > 0)
@@ -1080,6 +1086,12 @@ void App::UpdateSheet(double dt, const Input& in)
 		m_online_seen = st;
 	}
 
+	// vk-285-135: the folder picker has the buttons while it is open (Circle goes back a folder, not out of the sheet).
+	if (m_picker.open)
+	{
+		UpdatePicker(dt, in);
+		return;
+	}
 	if (pressed(in.circle, m_prev.circle) || pressed(in.square, m_prev.square) || pressed(in.options, m_prev.options))
 	{
 		CloseSheet();
@@ -1190,6 +1202,26 @@ void App::UpdateSheet(double dt, const Input& in)
 			std::fflush(stdout);
 			Sound(started ? Sfx::Move : Sfx::Edge, 0.3f);
 		}
+		return;
+	}
+
+	// vk-285-135: the Folders rows: Cross opens the picker (game folders, the BIOS folder) or the share list; Triangle sets the
+	// BIOS folder back to its default.
+	if (row.kind == OptionsSheet::Kind::GameFolders || row.kind == OptionsSheet::Kind::BiosFolder ||
+		row.kind == OptionsSheet::Kind::NfsShares)
+	{
+		if (pressed(in.cross, m_prev.cross))
+		{
+			m_sheet.Activate(row, now);
+			const OptionsSheet::Kind asked = m_sheet.TakeFolderRequest();
+			if (asked != OptionsSheet::Kind::Header)
+			{
+				OpenPicker(asked);
+				Sound(Sfx::Move, 0.3f);
+			}
+		}
+		else if (pressed(in.triangle, m_prev.triangle))
+			after(m_sheet.Reset(row));
 		return;
 	}
 
@@ -1716,6 +1748,14 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 		return;
 	}
 
+	// vk-285-135: the folder picker, in the rows' place.
+	if (m_picker.open)
+	{
+		BuildPicker(ui, x, sw, y, sh, k, accent);
+		FadeRange(ui, begin, ui.size(), Clamp(e * 1.4f, 0.0f, 1.0f));
+		return;
+	}
+
 	// The rows: a list that scrolls to keep the focused row in view.
 	const auto& rows = m_sheet.rows();
 	const float list_top = y + kSheetListTop * k, list_bottom = y + sh - kSheetHelpH * k;
@@ -1798,7 +1838,12 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 			if (m_texpack_armed == serial && m_time <= m_texpack_armed_until)
 				value = "Press again";
 		}
-		const bool arrows = focused && !action && pick_arrows;
+		// vk-285-135: the Folders rows open a list (Cross); left and right don't change them.
+		const bool folder_row = r.kind == OptionsSheet::Kind::GameFolders || r.kind == OptionsSheet::Kind::BiosFolder ||
+		                        r.kind == OptionsSheet::Kind::NfsShares;
+		if (folder_row && focused)
+			value += "  \xE2\x80\xBA";
+		const bool arrows = focused && !action && pick_arrows && !folder_row;
 
 		const float value_room = bw * (pack_row ? 0.68f : 0.46f); // 2026-10-05: the pack row's label is short, its value long
 		// vk-285-116: a label or a value that starts with a button's symbol ("<glyph>  Cross", the Controls tab): the symbol
@@ -1890,6 +1935,385 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 
 	FadeRange(ui, begin, ui.size(), Clamp(e * 1.4f, 0.0f, 1.0f));
 }
+// ---- vk-285-135: the sheet's folder picker and NFS share list (AI-assisted) ------------------------------------------
+// Spyros: "also where is the option to select what dir is set for games and bios?", "i also want to pick a folder though the
+// browser in the shelf". The sheet for all games' Folders rows open it in the sheet's place: the places first (the folders
+// added already, /data/PCSX2, the drives, the NFS shares), then a folder's folders, "Use this folder" at the top with the
+// games found there. The choice goes into gs.ini (the sheet's own file), which main-boot.cpp reads when PS5SX2 starts.
+
+namespace
+{
+bool IsFolder(const std::string& path)
+{
+	struct stat st = {};
+	return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+// A folder's folders (sorted, hidden and system ones left out, at most 500) and how many disc images are in it.
+void ListFolder(const std::string& dir, std::vector<std::string>& folders, int& images)
+{
+	folders.clear();
+	images = 0;
+	if (DIR* d = opendir(dir.c_str()))
+	{
+		while (const dirent* e = readdir(d))
+		{
+			if (e->d_name[0] == '.' || e->d_name[0] == '$')
+				continue;
+			if (IsDiscImageName(e->d_name))
+			{
+				images++;
+				continue;
+			}
+			bool folder = e->d_type == DT_DIR;
+			if (e->d_type == DT_UNKNOWN || e->d_type == DT_LNK)
+				folder = IsFolder(dir + "/" + e->d_name);
+			if (folder && folders.size() < 500)
+				folders.emplace_back(e->d_name);
+		}
+		closedir(d);
+	}
+	std::sort(folders.begin(), folders.end(), [](const std::string& a, const std::string& b) {
+		const size_t n = std::min(a.size(), b.size());
+		for (size_t i = 0; i < n; i++)
+		{
+			const int ca = std::tolower(static_cast<unsigned char>(a[i])), cb = std::tolower(static_cast<unsigned char>(b[i]));
+			if (ca != cb)
+				return ca < cb;
+		}
+		return a.size() < b.size();
+	});
+}
+
+std::string Parent(const std::string& path)
+{
+	const size_t slash = path.find_last_of('/');
+	return slash == std::string::npos || slash == 0 ? std::string("/") : path.substr(0, slash);
+}
+
+bool StartsWithNoCase(const std::string& s, const char* prefix)
+{
+	for (size_t i = 0; prefix[i]; i++)
+		if (i >= s.size() || std::tolower(static_cast<unsigned char>(s[i])) != std::tolower(static_cast<unsigned char>(prefix[i])))
+			return false;
+	return true;
+}
+} // namespace
+
+void App::OpenPicker(OptionsSheet::Kind kind)
+{
+	m_picker = FolderPicker();
+	m_picker.open = true;
+	m_picker.kind = kind;
+	PickerList("");
+	std::printf("[options] %s\n", kind == OptionsSheet::Kind::NfsShares ? "NFS share list" :
+	                              kind == OptionsSheet::Kind::BiosFolder ? "folder picker for the BIOS folder" : "folder picker for game folders");
+	std::fflush(stdout);
+}
+
+void App::PickerList(const std::string& dir, const std::string& focus)
+{
+	FolderPicker& p = m_picker;
+	p.dir = dir;
+	p.items.clear();
+	using T = PickerItem::Type;
+	if (p.kind == OptionsSheet::Kind::NfsShares)
+	{
+		p.items.push_back({T::Add, "Add a share", "", "nfs://"});
+		for (const std::string& share : SplitFolderList(m_sheet.OwnValue(kNfsSharesKey)))
+			p.items.push_back({T::Share, share, share, ""});
+	}
+	else if (dir.empty())
+	{
+		if (p.kind == OptionsSheet::Kind::GameFolders)
+			for (const std::string& f : SplitFolderList(m_sheet.OwnValue(kGameFoldersKey)))
+				p.items.push_back({T::Listed, f, f, "Added"});
+		for (const auto& [label, path] : m_cfg.folder_places)
+			if (IsFolder(path))
+				p.items.push_back({T::Place, label, path, path});
+	}
+	else
+	{
+		std::vector<std::string> folders;
+		int images = 0;
+		ListFolder(dir, folders, images);
+		std::string value;
+		if (p.kind == OptionsSheet::Kind::GameFolders)
+		{
+			// The games the shelf would list from it: its own, and those one folder down (as main-boot.cpp lists folders).
+			int below = 0;
+			for (size_t i = 0; i < folders.size() && i < 64; i++)
+			{
+				std::vector<std::string> sub;
+				int n = 0;
+				ListFolder(dir + "/" + folders[i], sub, n);
+				below += n;
+			}
+			const int games = images + below;
+			value = games == 0 ? "No games" : games == 1 ? "1 game" : std::to_string(games) + " games";
+		}
+		p.items.push_back({T::Use, "Use this folder", dir, value});
+		for (const std::string& f : folders)
+			p.items.push_back({T::Folder, f, dir + "/" + f, ""});
+	}
+	p.row = 0;
+	for (size_t i = 0; i < p.items.size(); i++)
+		if (!focus.empty() && p.items[i].path == focus)
+			p.row = static_cast<int>(i);
+	p.scroll = p.scroll_target = 0;
+}
+
+void App::UpdatePicker(double dt, const Input& in)
+{
+	FolderPicker& p = m_picker;
+	auto pressed = [&](bool now, bool before) { return now && !before; };
+	auto status = [&](const std::string& text) {
+		m_sheet_status = text;
+		m_sheet_status_time = m_time;
+	};
+	using T = PickerItem::Type;
+	using K = OptionsSheet::Kind;
+
+	// The PS5's keyboard is up for a share's address: it has the controller until it closes.
+	if (p.typing)
+	{
+		std::string text;
+		const int r = m_cfg.text_entry.poll ? m_cfg.text_entry.poll(text) : -1;
+		if (r == 0)
+			return;
+		p.typing = false;
+		while (!text.empty() && (text.back() == ' ' || text.back() == ';'))
+			text.pop_back();
+		while (!text.empty() && text.front() == ' ')
+			text.erase(0, 1);
+		if (r > 0 && text.size() > 6 && StartsWithNoCase(text, "nfs://") && text.find(';') == std::string::npos)
+		{
+			std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(kNfsSharesKey));
+			if (std::find(list.begin(), list.end(), text) == list.end())
+				list.push_back(text);
+			if (m_sheet.SetOwn(kNfsSharesKey, JoinFolderList(list), "NFS share added: " + text))
+				status("Added " + text + ": restart PS5SX2 to mount it");
+			PickerList("", text);
+			Sound(Sfx::Move, 0.3f);
+		}
+		else
+		{
+			status(r > 0 && !text.empty() && text != "nfs://" ? "Not an nfs:// address: nothing added" : "Nothing added");
+			Sound(Sfx::Edge, 0.3f);
+		}
+		return;
+	}
+
+	// Circle: up a folder, from a place's top back to the places, from the places back to the sheet.
+	if (pressed(in.circle, m_prev.circle) || pressed(in.options, m_prev.options))
+	{
+		if (p.dir.empty() || pressed(in.options, m_prev.options))
+			p.open = false;
+		else
+		{
+			bool place = false;
+			for (const auto& pl : m_cfg.folder_places)
+				place = place || pl.second == p.dir;
+			const std::string from = p.dir;
+			PickerList(place ? std::string() : Parent(p.dir), from);
+		}
+		Sound(Sfx::Move, 0.3f);
+		return;
+	}
+	if (p.items.empty())
+		return;
+
+	// Up and down, repeating while held (as the sheet's rows).
+	const int v = in.up ? -1 : in.down ? 1 : 0;
+	const bool fresh = (in.up && !m_prev.up) || (in.down && !m_prev.down);
+	auto move = [&](int d) {
+		const int to = std::clamp(p.row + d, 0, static_cast<int>(p.items.size()) - 1);
+		const bool moved = to != p.row;
+		p.row = to;
+		return moved;
+	};
+	if (v != 0 && fresh)
+	{
+		Sound(move(v) ? Sfx::Move : Sfx::Edge, 0.3f);
+		p.held = v;
+		p.held_for = 0;
+		p.next_repeat = 0.34;
+	}
+	else if (v != 0 && v == p.held)
+	{
+		p.held_for += dt;
+		bool moved = false;
+		while (p.held_for >= p.next_repeat)
+		{
+			moved |= move(v);
+			p.next_repeat += 0.085;
+		}
+		if (moved)
+			Sound(Sfx::MoveRepeat, 0.3f);
+	}
+	else
+		p.held = 0;
+
+	const PickerItem item = p.items[static_cast<size_t>(p.row)];
+	if (pressed(in.cross, m_prev.cross))
+	{
+		switch (item.type)
+		{
+			case T::Folder:
+			case T::Place:
+				PickerList(item.path);
+				Sound(Sfx::Move, 0.3f);
+				break;
+			case T::Use:
+				if (p.kind == K::BiosFolder)
+				{
+					m_sheet.SetOwn(kBiosFolderKey, item.path, "BIOS folder picked");
+					status("BIOS folder: " + item.path + " (restart PS5SX2)");
+				}
+				else
+				{
+					std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(kGameFoldersKey));
+					if (std::find(list.begin(), list.end(), item.path) != list.end())
+						status(item.path + " is listed already");
+					else
+					{
+						list.push_back(item.path);
+						if (m_sheet.SetOwn(kGameFoldersKey, JoinFolderList(list), "game folder added"))
+							status("Added " + item.path + ": restart PS5SX2 to list its games");
+					}
+				}
+				std::printf("[options] %s picked: %s\n", p.kind == K::BiosFolder ? "BIOS folder" : "game folder", item.path.c_str());
+				std::fflush(stdout);
+				p.open = false;
+				Sound(Sfx::Move, 0.3f);
+				break;
+			case T::Add:
+				if (m_cfg.text_entry.open && m_cfg.text_entry.open("NFS share: nfs://server/shared folder", item.value, false, 255))
+					p.typing = true;
+				else
+				{
+					status("The keyboard didn't open: add shares on the settings page (Folders)");
+					Sound(Sfx::Edge, 0.3f);
+				}
+				break;
+			case T::Listed:
+			case T::Share:
+				status("Triangle removes it");
+				Sound(Sfx::Edge, 0.3f);
+				break;
+		}
+		return;
+	}
+	if (pressed(in.triangle, m_prev.triangle) && (item.type == T::Listed || item.type == T::Share))
+	{
+		const char* const key = item.type == T::Share ? kNfsSharesKey : kGameFoldersKey;
+		std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(key));
+		list.erase(std::remove(list.begin(), list.end(), item.path), list.end());
+		if (m_sheet.SetOwn(key, JoinFolderList(list), std::string(item.type == T::Share ? "NFS share" : "game folder") + " removed: " + item.path))
+			status("Removed " + item.path + " (restart PS5SX2)");
+		const int keep = p.row;
+		PickerList(p.dir);
+		p.row = std::min(keep, std::max(0, static_cast<int>(p.items.size()) - 1));
+		Sound(Sfx::Move, 0.3f);
+	}
+}
+
+void App::BuildPicker(std::vector<UiVertex>& ui, float x, float sw, float y, float sh, float k, uint32_t accent)
+{
+	const FolderPicker& p = m_picker;
+	using T = PickerItem::Type;
+	using K = OptionsSheet::Kind;
+	const uint32_t hi = Rgba(1, 1, 1), mid = Rgba(0.74f, 0.72f, 0.84f), lo = Rgba(0.52f, 0.50f, 0.64f);
+	const uint32_t own = Rgba(Mix(m_glow[0], 1.0f, 0.45f), Mix(m_glow[1], 1.0f, 0.45f), Mix(m_glow[2], 1.0f, 0.45f));
+	const float cx = x + 64 * k, inner = sw - 128 * k;
+	const float list_top = y + kSheetListTop * k, list_bottom = y + sh - kSheetHelpH * k;
+
+	// Where it is: what for, and the folder shown.
+	const char* what = p.kind == K::NfsShares ? "NFS SHARES" : p.kind == K::BiosFolder ? "THE BIOS FOLDER" : "A GAME FOLDER";
+	const std::string head = p.kind == K::NfsShares ? std::string(what) : std::string("PICK ") + what;
+	m_fonts->AddText(ui, head.c_str(), cx, list_top + 40 * k, 26 * k, lo, 0.45f);
+	if (!p.dir.empty())
+		m_fonts->AddText(ui, Fit(*m_fonts, p.dir, 30 * k, inner).c_str(), cx, list_top + 84 * k, 30 * k, mid, 0.3f);
+	else if (p.kind != K::NfsShares)
+		m_fonts->AddText(ui, "Where to look", cx, list_top + 84 * k, 30 * k, mid, 0.3f);
+
+	const float rows_top = list_top + 110 * k;
+	const float view_h = (list_bottom - rows_top) / k;
+	const float focus_top = p.row * kRowH, focus_bottom = focus_top + kRowH;
+	FolderPicker& mp = m_picker;
+	if (focus_top < mp.scroll_target + 20.0f)
+		mp.scroll_target = std::max(0.0f, focus_top - 20.0f);
+	if (focus_bottom > mp.scroll_target + view_h - 20.0f)
+		mp.scroll_target = focus_bottom - view_h + 20.0f;
+	mp.scroll_target = std::clamp(mp.scroll_target, 0.0f, std::max(0.0f, p.items.size() * kRowH - view_h));
+	mp.scroll += (mp.scroll_target - mp.scroll) * 0.35f;
+
+	if (p.items.empty())
+		m_fonts->AddText(ui, "Nothing here", cx, rows_top + 60 * k, 34 * k, lo, 0.3f);
+	for (size_t i = 0; i < p.items.size(); i++)
+	{
+		const PickerItem& it = p.items[i];
+		const float ry = rows_top + (i * kRowH - mp.scroll) * k;
+		const float rh = kRowH * k;
+		if (ry < rows_top - 2 * k || ry + rh > list_bottom + 2 * k)
+			continue;
+		const bool focused = static_cast<int>(i) == p.row;
+		const float bx = x + 32 * k, bw = sw - 64 * k, bh = rh - 10 * k;
+		if (focused)
+		{
+			Fonts::AddRoundedRect(ui, bx, ry, bw, bh, 26 * k, Rgba(1, 1, 1, 0.11f));
+			Fonts::AddRoundedRect(ui, bx + 14 * k, ry + 24 * k, 6 * k, bh - 48 * k, 3 * k, accent);
+		}
+		const float mid_y = ry + bh * 0.5f + 13 * k;
+		const bool action = it.type == T::Use || it.type == T::Add;
+		const char* const mark = it.type == T::Folder || it.type == T::Place ? "\xE2\x80\xBA" : ""; // a folder to go into
+		const float vpx = 34 * k, lpx = 40 * k;
+		const float value_w = it.value.empty() ? 0.0f : std::min(bw * 0.42f, m_fonts->Measure(it.value.c_str(), vpx));
+		const std::string label = Fit(*m_fonts, it.label, lpx, bw - 120 * k - (value_w > 0 ? value_w + 60 * k : 0.0f));
+		m_fonts->AddText(ui, label.c_str(), bx + 48 * k, mid_y, lpx, action ? own : hi, 0.25f);
+		float vx = bx + bw - 44 * k;
+		if (*mark)
+		{
+			m_fonts->AddText(ui, mark, vx, mid_y + 1 * k, 44 * k, focused ? hi : lo, 0.4f, Fonts::Right);
+			vx -= 46 * k;
+		}
+		if (!it.value.empty())
+			m_fonts->AddText(ui, Fit(*m_fonts, it.value, vpx, bw * 0.42f).c_str(), vx, mid_y, vpx,
+				it.type == T::Listed ? own : mid, 0.4f, Fonts::Right);
+	}
+
+	// What the buttons do here.
+	Fonts::AddRoundedRect(ui, cx, list_bottom + 44 * k, inner, 2 * k, 0, Rgba(1, 1, 1, 0.12f));
+	std::string help;
+	const PickerItem* it = p.items.empty() ? nullptr : &p.items[static_cast<size_t>(p.row)];
+	if (p.typing)
+		help = "Type the share's address on the PS5's keyboard: nfs://<server>/<shared folder>, as the server shares it (a folder "
+		       "inside it works too). Add ?version=4 for an NFS v4 server.";
+	else if (it && it->type == T::Use)
+		help = p.kind == K::BiosFolder ? "Cross: look for the BIOS here first. Circle: back."
+		                               : "Cross: list the games in this folder (and in the folders in it). Circle: back.";
+	else if (it && (it->type == T::Listed || it->type == T::Share))
+		help = std::string("Triangle: remove it") + (it->type == T::Share ? " from the shares." : " from the game folders.") + " Circle: back to the sheet.";
+	else if (it && it->type == T::Add)
+		help = "Cross: type a share's address on the PS5's keyboard (nfs://<server>/<shared folder>). Circle: back to the sheet.";
+	else
+		help = std::string("Cross: open the folder. ") + (p.dir.empty() ? "Circle: back to the sheet." : "Circle: up a folder.");
+	if (!p.typing && p.kind != K::NfsShares)
+		help += " Changes take effect when PS5SX2 starts.";
+	float hy = list_bottom + 110 * k;
+	for (const std::string& line : Wrap(*m_fonts, help, 32 * k, inner, 4))
+	{
+		m_fonts->AddText(ui, line.c_str(), cx, hy, 32 * k, mid, 0.1f);
+		hy += 46 * k;
+	}
+	if (!m_sheet_status.empty() && m_time - m_sheet_status_time < 3.0)
+	{
+		const float a = 1.0f - Smoothstep(2.2f, 3.0f, static_cast<float>(m_time - m_sheet_status_time));
+		const uint32_t c = (own & 0x00FFFFFFu) | (static_cast<uint32_t>(a * 255.0f) << 24);
+		m_fonts->AddText(ui, Fit(*m_fonts, m_sheet_status, 30 * k, inner).c_str(), cx, y + sh - 40 * k, 30 * k, c, 0.4f);
+	}
+}
+
 // ---- 2026-10-05: the RetroAchievements account panel (L1 + Square), redesigned (AI-assisted) -------------------------
 // Spyros: "we gotta redesign the ra login screen, it now looks trash. use the shell keyboard and make the ui for the inputs
 // match our current ui". The panel now has the options sheet's look: a centred panel with its shadow, edge and body over a

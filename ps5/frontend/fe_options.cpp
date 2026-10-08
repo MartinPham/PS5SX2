@@ -290,6 +290,35 @@ std::string CardSize(uint64_t bytes)
 
 // The settings page's GROUPS (assets/web/index.html), in its order, with its labels, defaults and hints. The text field
 // (PS5SX2/TexturesDir) stays on the page: the console has no keyboard for a path.
+std::vector<std::string> SplitFolderList(const std::string& list)
+{
+	std::vector<std::string> items;
+	size_t at = 0;
+	while (at <= list.size())
+	{
+		size_t end = list.find_first_of(";|\n", at);
+		if (end == std::string::npos)
+			end = list.size();
+		std::string item = list.substr(at, end - at);
+		at = end + 1;
+		while (!item.empty() && (item.back() == ' ' || item.back() == '\t' || item.back() == '\r' || (item.back() == '/' && item.size() > 1)))
+			item.pop_back();
+		while (!item.empty() && (item.front() == ' ' || item.front() == '\t'))
+			item.erase(0, 1);
+		if (!item.empty() && std::find(items.begin(), items.end(), item) == items.end())
+			items.push_back(item);
+	}
+	return items;
+}
+
+std::string JoinFolderList(const std::vector<std::string>& items)
+{
+	std::string list;
+	for (const std::string& i : items)
+		list += (list.empty() ? "" : ";") + i;
+	return list;
+}
+
 const std::vector<OptionGroup>& OptionGroups()
 {
 	static const std::vector<OptionGroup> groups = {
@@ -306,8 +335,9 @@ const std::vector<OptionGroup>& OptionGroups()
 				// 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp), read when the game starts (main-boot.cpp).
 				Toggle("PS5SX2/FrameGeneration", "Frame generation", "false", "Frame gen %",
 					"Shows a frame made between two of the game's: a 60 fps game at 120 on a TV that takes 120 Hz (the TV switches to "
-					"120 Hz for the game), a 30 fps game at 60. A little more input lag, and small smears at the edges of fast movement. "
-					"Experimental. Takes effect when the game starts.",
+					"120 Hz for the game), a 30 fps game at 60. Only while the game holds its frame rate (an uneven one shows the game's own "
+					"frames); the FPS box then counts what the TV gets. A little more input lag, and small smears at the edges of fast "
+					"movement. Experimental. Takes effect when the game starts.",
 					true),
 			}},
 		{"Graphics",
@@ -542,6 +572,15 @@ void OptionsSheet::BuildRows()
 		add(Kind::Card, "Slot 2").slot = 2;
 		add(Kind::NewCard, "New card");
 	}
+	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): where the games and the
+	// BIOS are, on the sheet for all games (the app runs the picker and the share list).
+	if (settings && m_global && m_folder_rows)
+	{
+		add(Kind::Header, "Folders");
+		add(Kind::GameFolders, "Game folders");
+		add(Kind::BiosFolder, "BIOS folder");
+		add(Kind::NfsShares, "NFS shares");
+	}
 	// 2026-10-08 (AI-assisted; testers asked for the PS2's own boot and menu): the PS2's menu with no disc, from the sheet
 	// for all games.
 	if (settings && m_global && m_system_menu_row)
@@ -640,6 +679,21 @@ std::string OptionsSheet::Value(const Row& r) const
 		}
 		case Kind::SystemMenu:
 			return "Start";
+		case Kind::GameFolders: // vk-285-135
+		{
+			const size_t n = SplitFolderList(OwnValue(kGameFoldersKey)).size();
+			return n == 0 ? "Add a folder" : n == 1 ? "1 folder" : std::to_string(n) + " folders";
+		}
+		case Kind::BiosFolder:
+		{
+			const std::string v = OwnValue(kBiosFolderKey);
+			return v.empty() ? "PCSX2/bios" : v;
+		}
+		case Kind::NfsShares:
+		{
+			const size_t n = SplitFolderList(OwnValue(kNfsSharesKey)).size();
+			return n == 0 ? "None" : n == 1 ? "1 share" : std::to_string(n) + " shares";
+		}
 		case Kind::ElfDisc:
 		{
 			const std::string* v = Find(m_own, kElfDiscKey);
@@ -680,6 +734,12 @@ OptionsSheet::From OptionsSheet::Source(const Row& r) const
 			return SameState(m_own, ReadState(m_preset)) ? From::Own : From::Default;
 		case Kind::ElfDisc:
 			return Find(m_own, kElfDiscKey) ? From::Own : From::Default;
+		case Kind::GameFolders: // vk-285-135
+			return OwnValue(kGameFoldersKey).empty() ? From::Default : From::Own;
+		case Kind::BiosFolder:
+			return OwnValue(kBiosFolderKey).empty() ? From::Default : From::Own;
+		case Kind::NfsShares:
+			return OwnValue(kNfsSharesKey).empty() ? From::Default : From::Own;
 		default:
 			return From::Default;
 	}
@@ -772,6 +832,29 @@ std::string OptionsSheet::Help(const Row& r) const
 		case Kind::ElfDisc:
 			return "The disc image this ELF runs with, as PCSX2's ELF properties set it: a patched or translated game's executable "
 			       "with its own disc, or homebrew that reads one. No disc: the ELF alone. Used when it starts.";
+		case Kind::GameFolders: // vk-285-135
+		{
+			std::string h = "Cross: pick a folder on any drive or NFS share to list games from (and the folders in it); the ones added "
+			                "are at the top there, Triangle removes one. Without them PS5SX2 looks in /data/PCSX2/games, /data/PCSX2 and "
+			                "every USB, extended storage and M.2 drive. Read when PS5SX2 starts.";
+			const std::vector<std::string> list = SplitFolderList(OwnValue(kGameFoldersKey));
+			if (!list.empty())
+				h += " Now: " + JoinFolderList(list) + ".";
+			return h;
+		}
+		case Kind::BiosFolder:
+			return "Cross: pick the folder where the BIOS is looked for first. Triangle: back to /data/PCSX2/bios (then /data/PCSX2 and "
+			       "the drives' bios folders). Read when PS5SX2 starts.";
+		case Kind::NfsShares:
+		{
+			std::string h = "Cross: the NFS shares, and Add a share with the PS5's keyboard: nfs://<server>/<shared folder> (NFS v3, else "
+			                "v4; Windows: WinNFSd or haneWIN). Their games are listed like a drive's, from /nfs/<server>/. Read-only. "
+			                "Mounted when PS5SX2 starts; boot.log says how it went.";
+			const std::vector<std::string> list = SplitFolderList(OwnValue(kNfsSharesKey));
+			if (!list.empty())
+				h += " Now: " + JoinFolderList(list) + ".";
+			return h;
+		}
 		case Kind::SystemMenu:
 			return "Cross twice: the PS2's own menu with no disc in, as a PS2 with its tray empty: the memory card browser (copy and "
 			       "delete saves), the clock, the language. The memory cards set here are in the slots. Back to the shelf as from a game.";
@@ -1011,9 +1094,30 @@ bool OptionsSheet::Reset(const Row& r)
 			if (!Find(m_own, kElfDiscKey))
 				return false;
 			return Save({{Change::Unset, kElfDiscKey, {}}});
+		case Kind::BiosFolder: // vk-285-135
+			if (OwnValue(kBiosFolderKey).empty())
+				return false;
+			return SetOwn(kBiosFolderKey, "", "BIOS folder back to /data/PCSX2/bios");
+		case Kind::GameFolders:
+		case Kind::NfsShares:
+			m_status = "Cross: the list (Triangle there removes one)";
+			return false;
 		default:
 			return false;
 	}
+}
+
+std::string OptionsSheet::OwnValue(const std::string& key) const
+{
+	const std::string* v = Find(m_own, key);
+	return v ? *v : std::string();
+}
+
+bool OptionsSheet::SetOwn(const std::string& key, const std::string& value, const std::string& note)
+{
+	if (OwnValue(key) == value)
+		return false;
+	return Save({{value.empty() ? Change::Unset : Change::Set, key, value}}, note);
 }
 
 bool OptionsSheet::Armed(const Row& r, double now) const
@@ -1054,6 +1158,11 @@ bool OptionsSheet::Activate(const Row& r, double now)
 			Reload();
 			return true;
 		}
+		case Kind::GameFolders: // vk-285-135: the app opens its picker or the share list (TakeFolderRequest)
+		case Kind::BiosFolder:
+		case Kind::NfsShares:
+			m_folder_request = r.kind;
+			return true;
 		case Kind::SystemMenu: // 2026-10-08: the first press arms, a second within 4 s asks the app to start it
 			if (!(m_armed_row == index && now < m_armed_until))
 			{

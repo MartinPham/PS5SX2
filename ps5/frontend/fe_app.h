@@ -55,6 +55,9 @@ struct AppConfig
 	std::function<bool()> bios_present;
 	std::function<std::string()> bios_problem;
 	std::string bios_dir;
+	// vk-285-135 (AI-assisted): the sheet for all games' Folders rows and their picker start from these places (label, path),
+	// those that are folders when it opens (the drives come and go); empty: no Folders rows.
+	std::vector<std::pair<std::string, std::string>> folder_places;
 };
 
 class App
@@ -85,6 +88,7 @@ public:
 	bool AccountOpen() const { return m_account.open; }
 	bool SheetOpen() const { return m_sheet_open; }
 	int SheetTab() const { return m_sheet.tab(); }
+	bool PickerOpen() const { return m_picker.open; } // vk-285-135
 
 private:
 	struct Slot
@@ -119,6 +123,40 @@ private:
 	std::string TexturePackHelp(const TexturePackStatus& s, int pick, const std::string& serial) const;
 	void BuildTexturePackActivity(std::vector<UiVertex>& ui, float x, float y, float k, uint32_t accent);
 	void PollCovers();
+	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the folder picker of the
+	// sheet's Folders rows (game folders, the BIOS folder) and the NFS share list, in the sheet's place while it is open.
+	struct PickerItem
+	{
+		enum class Type
+		{
+			Use,    // "Use this folder" (the folder shown)
+			Folder, // a folder in it: Cross goes in
+			Place,  // a drive, /data/PCSX2, the NFS shares: Cross goes in
+			Listed, // a game folder added already (Triangle removes it)
+			Add,    // "Add a share" (the PS5's keyboard)
+			Share,  // an NFS share's address (Triangle removes it)
+		};
+		Type type = Type::Folder;
+		std::string label, path, value;
+	};
+	struct FolderPicker
+	{
+		bool open = false;
+		OptionsSheet::Kind kind = OptionsSheet::Kind::Header;
+		std::string dir; // "" the places (the share list for NFS)
+		std::vector<std::string> trail; // the folders gone into, to come back to their rows
+		std::vector<PickerItem> items;
+		int row = 0;
+		float scroll = 0, scroll_target = 0;
+		bool typing = false; // the PS5's keyboard is open for a share's address
+		int held = 0;
+		double held_for = 0, next_repeat = 0;
+	};
+	void OpenPicker(OptionsSheet::Kind kind);
+	void PickerList(const std::string& dir, const std::string& focus = {});
+	void UpdatePicker(double dt, const Input& in);
+	void BuildPicker(std::vector<UiVertex>& ui, float x, float sw, float y, float sh, float k, uint32_t accent);
+	FolderPicker m_picker;
 	void UpdateAccount(const Input& in);
 	void BuildAccount(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent);
 	void BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, float w, float k);

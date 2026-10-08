@@ -72,6 +72,15 @@ struct OptionsPaths
 // 2026-10-08: an ELF's disc image, by its file name as the shelf lists it (main-boot.cpp finds it in the game folders).
 constexpr const char* kElfDiscKey = "PS5SX2/ElfDisc";
 
+// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the folders main-boot.cpp
+// reads when PS5SX2 starts, in gs.ini, set from the sheet for all games (the app's folder picker) as from the settings page.
+constexpr const char* kGameFoldersKey = "PS5SX2/GameFolders"; // folders separated by ';'
+constexpr const char* kBiosFolderKey = "PS5SX2/BiosFolder";
+constexpr const char* kNfsSharesKey = "PS5SX2/NfsShares"; // nfs:// addresses separated by ';'
+// A list setting's items (';' or '|' between them, spaces and a folder's last '/' off), and the list again.
+std::vector<std::string> SplitFolderList(const std::string& list);
+std::string JoinFolderList(const std::vector<std::string>& items);
+
 class OptionsSheet
 {
 public:
@@ -89,6 +98,9 @@ public:
 		OnlinePatches, // 2026-10-08: "Get patches and cheats" (the app runs it: fe_patchdl.h)
 		SystemMenu,  // 2026-10-08: the sheet for all games: start the PS2's own menu with no disc (the app starts it)
 		ElfDisc,     // 2026-10-08: an ELF's sheet: the disc image it runs with (kElfDiscKey)
+		GameFolders, // vk-285-135: the sheet for all games: more game folders (the app's folder picker)
+		BiosFolder,  // vk-285-135: where the BIOS is looked for first (the folder picker)
+		NfsShares,   // vk-285-135: NFS shares' addresses (the app's list, the PS5's keyboard)
 	};
 
 	enum class From
@@ -125,6 +137,19 @@ public:
 		m_system_menu = false;
 		return asked;
 	}
+	// vk-285-135: the sheet for all games gets the Folders rows (game folders, BIOS folder, NFS shares). Cross on one asks
+	// the app for its picker: TakeFolderRequest gives that row's kind once (else Kind::Header).
+	void SetFolderRows(bool on) { m_folder_rows = on; }
+	Kind TakeFolderRequest()
+	{
+		const Kind k = m_folder_request;
+		m_folder_request = Kind::Header;
+		return k;
+	}
+	// vk-285-135: the sheet's own file's value of a key ("" when it isn't set), and a key set (an empty value: unset) and
+	// saved as the rows' changes are, `note` saying what for in the settings log.
+	std::string OwnValue(const std::string& key) const;
+	bool SetOwn(const std::string& key, const std::string& value, const std::string& note);
 	int tab() const { return m_tab; }
 
 	bool is_global() const { return m_global; }
@@ -189,6 +214,8 @@ private:
 	bool m_texture_pack_row = false;
 	bool m_online_patch_row = false; // 2026-10-08
 	bool m_system_menu_row = false, m_system_menu = false; // 2026-10-08
+	bool m_folder_rows = false; // vk-285-135
+	Kind m_folder_request = Kind::Header;
 	bool m_elf = false; // 2026-10-08: this sheet's game is an ELF (the Disc image row)
 	int m_armed_row = -1;
 	double m_armed_until = 0;

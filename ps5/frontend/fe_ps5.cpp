@@ -1812,6 +1812,13 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		acfg.options.cheats_dir = paths.cheats_dir;
 	}
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games offers the PS2 system menu (main-boot.cpp boots it)
+	// vk-285-135: the places the sheet's folder picker starts from (those that are folders when it opens).
+	acfg.folder_places = {{"PS5SX2's folder", "/data/PCSX2"}};
+	for (int i = 0; i < 8; i++)
+		acfg.folder_places.push_back({"USB drive " + std::to_string(i + 1), "/mnt/usb" + std::to_string(i)});
+	acfg.folder_places.push_back({"Extended storage", "/mnt/ext0"});
+	acfg.folder_places.push_back({"Extended storage 2", "/mnt/ext1"});
+	acfg.folder_places.push_back({"NFS shares", "/nfs"}); // OrbisNfs.cpp: a folder while shares are set
 	acfg.bios_present = paths.bios_check; // vk-285-134
 	acfg.bios_problem = paths.bios_problem;
 	acfg.bios_dir = paths.bios_dir;

@@ -3,7 +3,7 @@
 // writes the frames it is told to as PNG files. Nothing of this goes into the eboot.
 //
 //   build-host.sh && ./fe_host --data <folder> --out <folder> [--size 1920x1080] [--lang <ps5 language id>] [--ime]
-//   [--no-bios "<what was found instead>"] (vk-285-134)
+//   [--no-bios "<what was found instead>"] (vk-285-134) [--ime-text "<what the keyboard types>"] (vk-285-135: with --ime)
 //                               [--script <file>] [step ...]
 //
 // <folder> for --data is a stand-in for /data/PCSX2: settings/, gs.ini, patches/, memcards/ (made when missing).
@@ -318,6 +318,7 @@ int main(int argc, char** argv)
 	int lang = 1; // English
 	bool achievements_preview = false;
 	bool ime = false;
+	std::string ime_text = "PreviewPlayer"; // vk-285-135: what the stand-in keyboard types (not for a password)
 	std::vector<Step> steps;
 	std::string texpacks;      // 2026-10-05: a folder with metadata.json (archive.org's list) and pack files
 	double texpacks_rate = 0;  // KB a second for the fake downloads (0: as fast as the disk)
@@ -350,6 +351,11 @@ int main(int argc, char** argv)
 			achievements_preview = true;
 		else if (a == "--ime") // 2026-10-05: a stand-in for the PS5's keyboard
 			ime = true;
+		else if (a == "--ime-text" && i + 1 < argc) // vk-285-135
+		{
+			ime = true;
+			ime_text = argv[++i];
+		}
 		else if (a == "--texpacks") // 2026-10-05: texture packs from a folder standing in for archive.org
 			texpacks = next();
 		else if (a == "--texpacks-rate")
@@ -443,7 +449,7 @@ int main(int argc, char** argv)
 	if (ime)
 	{
 		acfg.text_entry.open = [&](const std::string& title, const std::string&, bool password, unsigned) {
-			ime_pending = password ? "hunter2-preview" : "PreviewPlayer";
+			ime_pending = password ? "hunter2-preview" : ime_text;
 			std::printf("[host] the PS5's keyboard (stand-in) for %s\n", title.c_str());
 			return true;
 		};
@@ -542,6 +548,8 @@ int main(int argc, char** argv)
 	acfg.build_tag = "vk-285-114 (host)";
 	acfg.options = op;
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games' "PS2 system menu" row
+	// vk-285-135: the folder picker's places: the data folder (as /data/PCSX2) and two "drives" in it, when they are folders.
+	acfg.folder_places = {{"PS5SX2's folder", data}, {"USB drive 1", data + "/usb0"}, {"Extended storage", data + "/ext0"}};
 	if (no_bios)
 	{
 		acfg.bios_present = [] { return false; };
@@ -613,7 +621,8 @@ int main(int argc, char** argv)
 			const int got = key == "selected" ? app.Chosen() : key == "account" ? app.AccountOpen() : key == "sheet" ? app.SheetOpen() :
 			                key == "tab"      ? app.SheetTab() :
 			                key == "done"     ? app.Done() : // 2026-10-08: the shelf closed (a game, or the PS2 system menu)
-			                key == "systemmenu" ? app.SystemMenuChosen() : -99;
+			                key == "systemmenu" ? app.SystemMenuChosen() :
+			                key == "picker"   ? app.PickerOpen() : -99; // vk-285-135
 			if (got == -99 || eq == std::string::npos)
 			{
 				std::fprintf(stderr, "[host] unknown expect: %s\n", s.arg.c_str());
