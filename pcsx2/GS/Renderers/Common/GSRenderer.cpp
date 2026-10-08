@@ -38,6 +38,7 @@ extern "C" int sceKernelAvailableFlexibleMemorySize(unsigned long long* size); /
 #include <array>
 #include <chrono>
 #include <deque>
+#include <memory> // 2026-10-08: the panels' picture reads (std::shared_ptr)
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -1188,33 +1189,123 @@ static void OrbisDrawQrPanel()
 	g_gs_device->PresentRect(s_tex, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), nullptr, GSVector4(x0, y0, x1, y1), PresentShader::COPY, 0.0f, Nearest);
 }
 
-// 2026-10-08 (AI-assisted; a tester: "RA challenge indicator icon bottom-right with an on/off"): the badges of the
+// ---- 2026-10-08 (AI-assisted): the RetroAchievements challenge icons and the overlay picture ----
+// Their PNG files are read and decoded on a thread of their own (the GS thread makes no calls on /data, where an open can
+// take 30 ms or more: orbis_paths.cpp, vk-285-105), uploaded once a vsync before the present begins (OrbisPreparePanels,
+// outside the swapchain's render pass), and only drawn during the present (OrbisDrawChallengeIcons, OrbisDrawBezel).
+// Needs proper testing on the console.
+bool OrbisLoadPng(const std::string& path, int max_w, int max_h, std::vector<u32>& rgba, int& w, int& h, std::string& why); // ProsperoGS.cpp
+
+namespace
+{
+// One picture being read: the first of `candidates` that exists and decodes (no bigger than max_w x max_h).
+struct OrbisImageJob
+{
+	std::vector<std::string> candidates;
+	int max_w = 0, max_h = 0;
+	std::atomic<bool> done{false};
+	bool ok = false;
+	std::string path, why; // the file used / why none was
+	std::vector<u32> rgba;
+	int w = 0, h = 0;
+};
+
+void* OrbisImageJobRun(void* arg)
+{
+	std::shared_ptr<OrbisImageJob>* holder = static_cast<std::shared_ptr<OrbisImageJob>*>(arg);
+	OrbisImageJob& job = **holder;
+	for (const std::string& path : job.candidates)
+	{
+		if (!FileSystem::FileExists(path.c_str()))
+			continue;
+		std::string why;
+		if (OrbisLoadPng(path, job.max_w, job.max_h, job.rgba, job.w, job.h, why))
+		{
+			job.ok = true;
+			job.path = path;
+			break;
+		}
+		job.why += (job.why.empty() ? "" : "; ") + path + ": " + why;
+	}
+	if (!job.ok && job.why.empty())
+		job.why = "not there";
+	job.done.store(true, std::memory_order_release);
+	delete holder;
+	return nullptr;
+}
+
+// Starts reading on a thread of its own; null when the thread couldn't start (try again later).
+std::shared_ptr<OrbisImageJob> OrbisLoadImageAsync(std::vector<std::string> candidates, int max_w, int max_h)
+{
+	auto job = std::make_shared<OrbisImageJob>();
+	job->candidates = std::move(candidates);
+	job->max_w = max_w;
+	job->max_h = max_h;
+	auto* holder = new std::shared_ptr<OrbisImageJob>(job);
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 512 * 1024); // stb_image's inflate tables live on the stack
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_t thread;
+	const int rc = pthread_create(&thread, &attr, OrbisImageJobRun, holder);
+	pthread_attr_destroy(&attr);
+	if (rc != 0)
+	{
+		delete holder;
+		return nullptr;
+	}
+	return job;
+}
+
+double OrbisPanelNow()
+{
+	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// A finished job's pixels as a texture (null when it failed or there's no texture).
+GSTexture* OrbisImageTexture(GSDevice* dev, OrbisImageJob& job)
+{
+	if (!job.ok || job.w <= 0 || job.h <= 0)
+		return nullptr;
+	GSTexture* tex = dev->CreateTexture(job.w, job.h, 1, GSTexture::Format::Color);
+	if (tex)
+		tex->Update(GSVector4i(0, 0, job.w, job.h), job.rgba.data(), job.w * 4);
+	std::vector<u32>().swap(job.rgba);
+	return tex;
+}
+} // namespace
+
+// The challenge icons (a tester: "RA challenge indicator icon bottom-right with an on/off"): the badges of the
 // RetroAchievements challenges active now (an achievement primed: it unlocks if the player keeps it up), in the bottom right
 // corner, newest on the left, as PCSX2 draws them with ImGui (Achievements.cpp DrawGameOverlays), which this port hasn't.
 // PS5SX2/RAChallengeIcons (main-boot.cpp, on by default as PCSX2's) turns them off. A badge still downloading is tried again
-// a second later. Needs proper testing on the console.
+// every 2 seconds for 30 seconds.
 std::atomic<int> g_orbis_ra_challenge{1};
-bool OrbisLoadPngRgba(const std::string& path, std::vector<u32>& rgba, int& w, int& h, int max_side); // ProsperoGS.cpp
-static void OrbisDrawChallengeIcons()
+namespace
+{
+struct OrbisIcon
+{
+	std::string path;
+	GSTexture* tex = nullptr;
+	std::shared_ptr<OrbisImageJob> job;
+	int tries = 0;
+	double retry_at = 0;
+	bool given_up = false;
+};
+std::vector<OrbisIcon> s_orbis_icons;
+GSDevice* s_orbis_icons_dev = nullptr;
+} // namespace
+
+static void OrbisPrepareChallengeIcons()
 {
 #ifdef PS5SX2_ACHIEVEMENTS
-	struct Icon
-	{
-		std::string path;
-		GSTexture* tex = nullptr;
-	};
-	static std::vector<Icon> s_icons;
-	static GSDevice* s_dev = nullptr;
 	static u32 s_gen = 0;
 	static bool s_on = false, s_listed = false;
-	static int s_wait = 0; // presents until a badge that didn't load is tried again
-	if (!g_gs_device)
-		return;
-	if (s_dev != g_gs_device.get())
+	if (s_orbis_icons_dev != g_gs_device.get())
 	{
-		s_icons.clear(); // the textures went with the old device
-		s_dev = g_gs_device.get();
-		s_listed = false;
+		for (OrbisIcon& icon : s_orbis_icons)
+			icon.tex = nullptr; // the textures went with the old device
+		s_orbis_icons_dev = g_gs_device.get();
 	}
 	const bool on = g_orbis_ra_challenge.load(std::memory_order_relaxed) != 0;
 	const u32 gen = Achievements::OrbisChallengeGeneration();
@@ -1224,55 +1315,58 @@ static void OrbisDrawChallengeIcons()
 		s_gen = gen;
 		s_on = on;
 		const std::vector<std::string> badges = on ? Achievements::OrbisChallengeBadges() : std::vector<std::string>();
-		std::vector<Icon> next;
+		std::vector<OrbisIcon> next;
 		for (const std::string& path : badges)
 		{
-			Icon icon;
+			OrbisIcon icon;
 			icon.path = path;
-			for (Icon& old : s_icons)
-				if (old.path == path && old.tex)
+			for (OrbisIcon& old : s_orbis_icons)
+				if (old.path == path && (old.tex || old.job || old.given_up))
 				{
-					icon.tex = old.tex;
-					old.tex = nullptr;
+					icon = std::move(old); // keeps its texture, its read in flight, or that it gave up
+					old = OrbisIcon();
+					break;
 				}
 			next.push_back(std::move(icon));
 		}
-		for (Icon& old : s_icons)
+		for (OrbisIcon& old : s_orbis_icons)
 			if (old.tex)
-				s_dev->Recycle(old.tex);
-		if (next.size() != s_icons.size())
+				s_orbis_icons_dev->Recycle(old.tex);
+		if (next.size() != s_orbis_icons.size())
 		{
 			printf("[present] RetroAchievements challenge icons: %zu%s\n", next.size(), on ? "" : " (PS5SX2/RAChallengeIcons off)");
 			fflush(stdout);
 		}
-		s_icons = std::move(next);
-		s_wait = 0;
+		s_orbis_icons = std::move(next);
 	}
-	if (s_icons.empty())
-		return;
-	if (s_wait > 0)
-		s_wait--;
-	else
+	const double now = OrbisPanelNow();
+	for (OrbisIcon& icon : s_orbis_icons)
 	{
-		bool missing = false;
-		for (Icon& icon : s_icons)
+		if (icon.tex || icon.given_up)
+			continue;
+		if (icon.job && icon.job->done.load(std::memory_order_acquire))
 		{
-			if (icon.tex)
-				continue;
-			std::vector<u32> rgba;
-			int w = 0, h = 0;
-			if (!OrbisLoadPngRgba(icon.path, rgba, w, h, 512))
+			icon.tex = OrbisImageTexture(s_orbis_icons_dev, *icon.job);
+			if (!icon.tex && ++icon.tries >= 15)
 			{
-				missing = true; // most likely still downloading (Achievements.cpp GetAchievementBadgePath)
-				continue;
+				icon.given_up = true;
+				printf("[present] challenge icon %s: %s; not tried again\n", icon.path.c_str(), icon.job->why.c_str());
+				fflush(stdout);
 			}
-			icon.tex = s_dev->CreateTexture(w, h, 1, GSTexture::Format::Color);
-			if (icon.tex)
-				icon.tex->Update(GSVector4i(0, 0, w, h), rgba.data(), w * 4);
+			icon.job.reset();
+			icon.retry_at = now + 2.0; // most likely still downloading (Achievements.cpp GetAchievementBadgePath)
 		}
-		if (missing)
-			s_wait = 60;
+		else if (!icon.job && now >= icon.retry_at)
+			icon.job = OrbisLoadImageAsync({icon.path}, 512, 512);
 	}
+#endif
+}
+
+static void OrbisDrawChallengeIcons()
+{
+#ifdef PS5SX2_ACHIEVEMENTS
+	if (!g_gs_device || s_orbis_icons_dev != g_gs_device.get() || s_orbis_icons.empty())
+		return;
 	const float ww = static_cast<float>(g_gs_device->GetWindowWidth());
 	const float wh = static_cast<float>(g_gs_device->GetWindowHeight());
 	const float k = wh / 2160.0f;
@@ -1283,7 +1377,7 @@ static void OrbisDrawChallengeIcons()
 	const float y0 = margin, y1 = y0 + size; // GL's is the bottom-left one
 #endif
 	float x1 = ww - margin;
-	for (const Icon& icon : s_icons)
+	for (const OrbisIcon& icon : s_orbis_icons)
 	{
 		if (!icon.tex)
 			continue;
@@ -1294,19 +1388,21 @@ static void OrbisDrawChallengeIcons()
 #endif
 }
 
-// 2026-10-08 (AI-assisted; testers: "PNG overlays/bezels, /data/PCSX2/overlays/default.png and <serial>.png, on for all games or
+// The overlay picture (testers: "PNG overlays/bezels, /data/PCSX2/overlays/default.png and <serial>.png, on for all games or
 // per game, a folder of our own"): a picture over the whole screen, alpha-blended (OrbisVkPresentBlend), over the game and
 // under the watermark and the box. PS5SX2/Bezel (main-boot.cpp, live, per game or for all) turns it on; the picture is
 // <serial>.png, else default.png, in PS5SX2/BezelDir when that is set, then in /data/PCSX2/overlays. It is meant to be the
-// screen's size (1920x1080 or 3840x2160) with a see-through middle where the game shows: the game keeps its own size and place
-// (Aspect ratio), and the picture is stretched to the screen. Needs proper testing on the console.
+// screen's size with a see-through middle where the game shows: the game keeps its own size and place (Aspect ratio), and the
+// picture is stretched to the screen. At most 1920x1080 (a 4K one decodes to 33 MB, too much for the app's memory).
 std::atomic<int> g_orbis_bezel{0};
 std::atomic<u32> g_orbis_bezel_gen{0}; // main-boot.cpp: PS5SX2/Bezel or BezelDir changed
 std::string OrbisBezelDirectory();     // main-boot.cpp: PS5SX2/BezelDir ("" when unset)
-static std::string s_orbis_bezel_serial; // the GS thread's copy of the game's serial (OrbisBezelGameChanged)
+static std::string s_orbis_bezel_serial; // the GS thread's copy of the game's serial
 static bool s_orbis_bezel_serial_new = false;
+static GSTexture* s_orbis_bezel_tex = nullptr;
+static GSDevice* s_orbis_bezel_dev = nullptr;
 
-// GS.cpp GSGameChanged, on the GS thread when the game (its serial) changes, as GSTextureReplacements::GameChanged learns it.
+// GS.cpp GSGameChanged, on the GS thread when the game (its serial) changes while the GS is open.
 void OrbisBezelGameChanged(const std::string& serial)
 {
 	if (serial == s_orbis_bezel_serial)
@@ -1315,38 +1411,41 @@ void OrbisBezelGameChanged(const std::string& serial)
 	s_orbis_bezel_serial_new = true;
 }
 
-#ifdef ORBIS_VULKAN
-static void OrbisDrawBezel()
+static void OrbisPrepareBezel()
 {
-	static GSTexture* s_tex = nullptr;
-	static GSDevice* s_dev = nullptr;
+#ifdef ORBIS_VULKAN
 	static u32 s_gen = 0;
-	static bool s_loaded = false; // looked for the picture since the last change
-	if (!g_gs_device || g_gs_device->GetRenderAPI() != RenderAPI::Vulkan)
+	static bool s_asked = false; // a read was started (or done) since the last change
+	static std::shared_ptr<OrbisImageJob> s_job;
+	if (g_gs_device->GetRenderAPI() != RenderAPI::Vulkan)
 		return;
-	if (s_dev != g_gs_device.get())
+	if (s_orbis_bezel_dev != g_gs_device.get())
 	{
-		s_tex = nullptr; // the texture went with the old device
-		s_dev = g_gs_device.get();
-		s_loaded = false;
+		s_orbis_bezel_tex = nullptr; // the texture went with the old device
+		s_orbis_bezel_dev = g_gs_device.get();
+		s_asked = false;
 	}
 	const u32 gen = g_orbis_bezel_gen.load(std::memory_order_acquire);
 	if (gen != s_gen || s_orbis_bezel_serial_new)
 	{
 		s_gen = gen;
 		s_orbis_bezel_serial_new = false;
-		s_loaded = false;
-		if (s_tex)
+		s_asked = false;
+		s_job.reset(); // a read in flight finishes on its own and is dropped
+		if (s_orbis_bezel_tex)
 		{
-			s_dev->Recycle(s_tex);
-			s_tex = nullptr;
+			s_orbis_bezel_dev->Recycle(s_orbis_bezel_tex);
+			s_orbis_bezel_tex = nullptr;
 		}
 	}
 	if (!g_orbis_bezel.load(std::memory_order_relaxed))
 		return;
-	if (!s_loaded)
+	if (!s_asked)
 	{
-		s_loaded = true;
+		s_asked = true;
+		// The game's serial: GSGameChanged doesn't run for the game the GS opened with (VMManager learns it before).
+		if (s_orbis_bezel_serial.empty())
+			s_orbis_bezel_serial = VMManager::GetDiscSerial();
 		std::vector<std::string> dirs;
 		std::string dir = OrbisBezelDirectory();
 		while (dir.size() > 1 && dir.back() == '/')
@@ -1354,47 +1453,50 @@ static void OrbisDrawBezel()
 		if (!dir.empty())
 			dirs.push_back(dir);
 		dirs.push_back("/data/PCSX2/overlays");
-		std::vector<std::string> names;
-		if (!s_orbis_bezel_serial.empty())
-			names.push_back(s_orbis_bezel_serial + ".png");
-		names.push_back("default.png");
-		std::string found;
+		std::vector<std::string> candidates;
 		for (const std::string& d : dirs)
 		{
-			for (const std::string& n : names)
-			{
-				const std::string path = d + "/" + n;
-				std::vector<u32> rgba;
-				int w = 0, h = 0;
-				if (!FileSystem::FileExists(path.c_str()))
-					continue;
-				if (!OrbisLoadPngRgba(path, rgba, w, h, 4096))
-				{
-					printf("[present] overlay %s: not a PNG this can read (or over 4096 pixels a side)\n", path.c_str());
-					continue;
-				}
-				s_tex = s_dev->CreateTexture(w, h, 1, GSTexture::Format::Color);
-				if (s_tex)
-					s_tex->Update(GSVector4i(0, 0, w, h), rgba.data(), w * 4);
-				printf("[present] overlay %s (%dx%d)%s\n", path.c_str(), w, h, s_tex ? "" : ": no texture");
-				found = path;
-				break;
-			}
-			if (!found.empty())
-				break;
+			if (!s_orbis_bezel_serial.empty())
+				candidates.push_back(d + "/" + s_orbis_bezel_serial + ".png");
+			candidates.push_back(d + "/default.png");
 		}
-		if (found.empty())
-			printf("[present] overlay: no %s%sdefault.png in %s%s\n", s_orbis_bezel_serial.c_str(), s_orbis_bezel_serial.empty() ? "" : ".png or ",
-				dirs[0].c_str(), dirs.size() > 1 ? " or /data/PCSX2/overlays" : "");
-		fflush(stdout);
+		s_job = OrbisLoadImageAsync(std::move(candidates), 1920, 1080);
+		if (!s_job)
+			s_asked = false; // no thread now: next vsync
 	}
-	if (!s_tex)
+	if (s_job && s_job->done.load(std::memory_order_acquire))
+	{
+		s_orbis_bezel_tex = OrbisImageTexture(s_orbis_bezel_dev, *s_job);
+		if (s_orbis_bezel_tex)
+			printf("[present] overlay %s (%dx%d)\n", s_job->path.c_str(), s_job->w, s_job->h);
+		else
+			printf("[present] overlay for %s: none (%s)\n", s_orbis_bezel_serial.empty() ? "no serial" : s_orbis_bezel_serial.c_str(),
+				s_job->why.c_str());
+		fflush(stdout);
+		s_job.reset();
+	}
+#endif
+}
+
+#ifdef ORBIS_VULKAN
+static void OrbisDrawBezel()
+{
+	if (!s_orbis_bezel_tex || !g_gs_device || s_orbis_bezel_dev != g_gs_device.get() || !g_orbis_bezel.load(std::memory_order_relaxed))
 		return;
 	const float ww = static_cast<float>(g_gs_device->GetWindowWidth());
 	const float wh = static_cast<float>(g_gs_device->GetWindowHeight());
-	OrbisVkPresentBlend(s_tex, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), GSVector4(0.0f, 0.0f, ww, wh));
+	OrbisVkPresentBlend(s_orbis_bezel_tex, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), GSVector4(0.0f, 0.0f, ww, wh));
 }
 #endif
+
+// Once a vsync, before the present begins (the frame generation's presents too): the pictures' uploads.
+static void OrbisPreparePanels()
+{
+	if (!g_gs_device)
+		return;
+	OrbisPrepareChallengeIcons();
+	OrbisPrepareBezel();
+}
 
 // The panels drawn over the game besides the box: the challenge icons, then the settings QR code over everything.
 static void OrbisDrawPanels()
@@ -2651,6 +2753,7 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		}
 
 		ORBIS_VS_MARK(ORBIS_VS_PREP);
+		OrbisPreparePanels(); // 2026-10-08: the challenge icons' and the overlay picture's uploads, outside the present's pass
 #ifdef ORBIS_VULKAN
 		// 2026-10-08 (AI-assisted): frame generation (PS5SX2/FrameGeneration; GSDeviceVK.cpp): the frame between the last one and
 		// this one, presented first (as many times as the pacing asks), PS5SX2's overlays over it as over the game's own frames.

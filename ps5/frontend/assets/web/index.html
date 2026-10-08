@@ -378,7 +378,7 @@ const GROUPS = [
       hint: "A blue graph of the last minute's frame rate in the top right corner. It shows with the info box off too." },
     // 2026-10-08 (AI-assisted; testers: "PNG overlays/bezels"): the overlay picture (GSRenderer.cpp OrbisDrawBezel), live.
     { key: "PS5SX2/Bezel", label: "Overlay picture", type: "toggle", def: "false", short: "Overlay %",
-      hint: "A bezel or frame drawn over the screen around the game: overlays/<game serial>.png (SLUS-21147.png), else overlays/default.png, in /data/PCSX2 or the Overlays folder below (All games). A PNG the size of the screen (1920x1080 or 3840x2160) with a see-through middle where the game shows; the game keeps its own size (Aspect ratio)." },
+      hint: "A bezel or frame drawn over the screen around the game: overlays/<game serial>.png (SLUS-21147.png), else overlays/default.png, in /data/PCSX2 or the Overlays folder below (All games). A 1920x1080 PNG (at most; it is stretched to the screen) with a see-through middle where the game shows; the game keeps its own size (Aspect ratio)." },
     // 2026-10-08 (AI-assisted): the RetroAchievements challenge icons (GSRenderer.cpp OrbisDrawChallengeIcons), live.
     { key: "PS5SX2/RAChallengeIcons", label: "Challenge icons", type: "toggle", def: "true", short: "Challenge icons %",
       hint: "RetroAchievements: the badge of each challenge going on (an achievement that unlocks if you keep it up, such as no damage taken) in the bottom right corner, while it lasts." },

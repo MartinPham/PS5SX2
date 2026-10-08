@@ -215,25 +215,44 @@ static bool OrbisPNGLoader(const std::string& filename, GSTextureReplacements::R
 }
 
 // 2026-10-08 (AI-assisted): a PNG file as RGBA8 pixels (R in the low byte, as GSTexture::Format::Color takes them), for the
-// RetroAchievements challenge icons and the overlay picture (GSRenderer.cpp OrbisDrawChallengeIcons, OrbisDrawBezel). False
-// when it can't be read or decoded, or is bigger than `max_side` pixels a side (a badge is 64, a 4K overlay 3840).
-bool OrbisLoadPngRgba(const std::string& path, std::vector<u32>& rgba, int& w, int& h, int max_side)
+// RetroAchievements challenge icons and the overlay picture (GSRenderer.cpp; called on a thread of their own, never the GS
+// thread). Its size is checked before it is decoded: false, with `why`, when it can't be read or decoded or is bigger than
+// max_w x max_h (a badge is 64x64, an overlay at most 1920x1080).
+bool OrbisLoadPng(const std::string& path, int max_w, int max_h, std::vector<u32>& rgba, int& w, int& h, std::string& why)
 {
   std::optional<std::vector<u8>> file = FileSystem::ReadBinaryFile(path.c_str());
-  if (!file || file->empty() || file->size() > (48u << 20))
-    return false;
-  int comp = 0;
-  stbi_uc* const px = stbi_load_from_memory(file->data(), static_cast<int>(file->size()), &w, &h, &comp, 4);
-  if (!px)
-    return false;
-  const bool ok = w > 0 && h > 0 && w <= max_side && h <= max_side;
-  if (ok)
+  if (!file || file->empty())
   {
-    rgba.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
-    std::memcpy(rgba.data(), px, rgba.size() * 4);
+    why = "can't be read";
+    return false;
   }
+  if (file->size() > (16u << 20))
+  {
+    why = "over 16 MB";
+    return false;
+  }
+  int comp = 0;
+  if (!stbi_info_from_memory(file->data(), static_cast<int>(file->size()), &w, &h, &comp))
+  {
+    why = "not a PNG";
+    return false;
+  }
+  if (w <= 0 || h <= 0 || w > max_w || h > max_h)
+  {
+    why = std::to_string(w) + "x" + std::to_string(h) + ", bigger than " + std::to_string(max_w) + "x" + std::to_string(max_h);
+    return false;
+  }
+  stbi_uc* const px = stbi_load_from_memory(file->data(), static_cast<int>(file->size()), &w, &h, &comp, 4);
+  file.reset(); // the file's bytes go before the pixels are copied
+  if (!px)
+  {
+    why = "couldn't be decoded";
+    return false;
+  }
+  rgba.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+  std::memcpy(rgba.data(), px, rgba.size() * 4);
   stbi_image_free(px);
-  return ok;
+  return true;
 }
 
 // vk-285-113: a DDS file (BC1/2/3/7 or uncompressed) as an RGBA8 replacement with its mip levels.
