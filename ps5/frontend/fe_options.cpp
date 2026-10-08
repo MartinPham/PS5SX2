@@ -296,7 +296,7 @@ const std::vector<OptionGroup>& OptionGroups()
 		{"Display",
 			{
 				Seg("upscale_multiplier", "Resolution", "1", "%", {{"1", "1x"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {"5", "5x"}, {"6", "6x"},
-										   {"8", "8x"}},
+										   {"8", "8x (PS5 Pro)"}},
 					"Internal resolution. 6x is about 4K; 8x draws more than the screen shows (about 5K, made smaller to fit): sharpest, and the heaviest on the GPU."),
 				Seg("AspectRatio", "Aspect ratio", "Auto 4:3/3:2", "Aspect %",
 					{{"Auto 4:3/3:2", "Auto"}, {"4:3", "4:3"}, {"16:9", "16:9"}, {"Stretch", "Stretch"}}),

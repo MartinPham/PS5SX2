@@ -2864,7 +2864,14 @@ bool VMManager::ShouldAllowPresentThrottle()
 {
 	const VMState state = GetState();
 	const bool valid_vm = (state != VMState::Shutdown && state != VMState::Stopping);
+#ifdef ORBIS_VULKAN
+	// PS5 port (vk-285-135): frame generation holds the speed at 99.92% (main-boot.cpp orbis_fg_hold, so its frames don't
+	// queue up), and that counted as "not normal speed": the throttle then dropped the game's frames that came within a
+	// refresh of the last one shown, the ones frame generation presents right after its own. Within 0.2% is normal speed.
+	return (!valid_vm || (!s_target_speed_synced_to_host && std::abs(s_target_speed - 1.0f) > 0.002f));
+#else
 	return (!valid_vm || (!s_target_speed_synced_to_host && s_target_speed != 1.0f));
+#endif
 }
 
 bool VMManager::Internal::WasFastBooted()

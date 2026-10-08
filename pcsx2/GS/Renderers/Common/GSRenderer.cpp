@@ -1578,16 +1578,20 @@ static void OrbisGLOSD(bool generated = false)
 {
 	if (!s_orbis_gl || !g_gs_device)
 		return;
-	static u64 s_count = 0;
+	static u64 s_count = 0, s_generated = 0;
 	static auto s_t0 = std::chrono::steady_clock::now();
 	static unsigned s_fps = 0;
+	static unsigned s_out_fps = 0; // vk-285-135: the game's frames and the generated ones, as the TV gets them
 	if (!generated)
 		s_count++;
+	else
+		s_generated++;
 	const auto now = std::chrono::steady_clock::now();
 	const double dt = std::chrono::duration<double>(now - s_t0).count();
 	if (dt >= 1.0)
 	{
 		s_fps = static_cast<unsigned>(static_cast<double>(s_count) / dt + 0.5);
+		s_out_fps = static_cast<unsigned>(static_cast<double>(s_count + s_generated) / dt + 0.5);
 		// vk-285-72: the loads come from the [load] line's counters (s_orbis_load_*), measured first; the
 		// line itself still prints after [perf].
 		const bool print = g_orbis_perf || g_orbis_test_build > 0; // eerec-280; test build 1: always in testing builds
@@ -1603,7 +1607,8 @@ static void OrbisGLOSD(bool generated = false)
 		OrbisReadbackAutoSecond(PerformanceMetrics::GetSpeed(), s_fps); // vk-285-118: older firmware's readback stall
 		if (print)
 		{
-			printf("[perf] fps=%u vfreq=%.2f speed=%.0f ee=%.0f gs=%.0f vu=%.0f ft=%.1f/%.1f/%.1f sw=", s_fps,
+			// vk-285-135: out= the frames the TV got, the generated ones with the game's (frame generation).
+			printf("[perf] fps=%u out=%u vfreq=%.2f speed=%.0f ee=%.0f gs=%.0f vu=%.0f ft=%.1f/%.1f/%.1f sw=", s_fps, s_out_fps,
 				GetVerticalFrequency(), PerformanceMetrics::GetSpeed(), ee, gs, vu,
 				PerformanceMetrics::GetMinimumFrameTime(), PerformanceMetrics::GetAverageFrameTime(),
 				PerformanceMetrics::GetMaximumFrameTime());
@@ -1618,6 +1623,7 @@ static void OrbisGLOSD(bool generated = false)
 		if (print)
 			fflush(stdout);
 		s_count = 0;
+		s_generated = 0;
 		s_t0 = now;
 	}
 	// vk-285-113: the frame rate four times a second for the graph: 240 samples, a minute, two pixels each.
@@ -1672,6 +1678,17 @@ static void OrbisGLOSD(bool generated = false)
 			s_orbis_label_frames--;
 		snprintf(text, sizeof(text), "%s", s_orbis_modes[s_orbis_mode].name);
 	}
+	// vk-285-135 (Spyros: "frame gen doesnt get me to 120 in any game, it actually gets me less fps than normal"): while frames are
+	// generated, the box counts what the TV gets, the generated frames with the game's: it counted the game's only, and with
+	// frame generation's skip of the game's repeated frames (a 50 fps stretch of Ratchet & Clank shows its 50, not the 60
+	// vsyncs a repeat fills) that read as fewer frames than without it. The game's own count follows in brackets.
+	else if (show_fps && show_loads && *fg_mark) // eerec-280; vk-285-72: the [load] line's loads
+		snprintf(text, sizeof(text), "%u FPS FG EE%u GS%u VU%u", s_out_fps,
+			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_ee : PerformanceMetrics::GetCPUThreadUsage()) + 0.5),
+			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_gs : PerformanceMetrics::GetGSThreadUsage()) + 0.5f),
+			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_vu : PerformanceMetrics::GetVUThreadUsage()) + 0.5f));
+	else if (show_fps && *fg_mark)
+		snprintf(text, sizeof(text), "FPS %u (game %u)", s_out_fps, s_fps);
 	else if (show_fps && show_loads) // eerec-280; vk-285-72: the [load] line's loads
 		snprintf(text, sizeof(text), "%u FPS%s EE%u GS%u VU%u", s_fps, fg_mark,
 			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_ee : PerformanceMetrics::GetCPUThreadUsage()) + 0.5),
@@ -2757,8 +2774,10 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		unsigned long long n = vs++;
 		if (n < 3 || (n % 100) == 0)
 		{
-			printf("[gsvs] #%llu skip=%d throttle_skip=%d blank=%d current=%p win=%dx%d\n", n,
-				(int)skip_frame, (int)g_gs_device->ShouldSkipPresentingFrame(), (int)blank_frame,
+			// vk-285-135: the throttle's state, not ShouldSkipPresentingFrame(): asking it takes this frame's turn, so every
+			// 100th vsync the frame right after this line was dropped while the throttle was on.
+			printf("[gsvs] #%llu skip=%d throttle=%d blank=%d current=%p win=%dx%d\n", n,
+				(int)skip_frame, (int)g_gs_device->IsPresentThrottleAllowed(), (int)blank_frame,
 				(void*)g_gs_device->GetCurrent(), (int)g_gs_device->GetWindowWidth(), (int)g_gs_device->GetWindowHeight());
 			fflush(stdout);
 		}
