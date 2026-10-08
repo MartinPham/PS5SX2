@@ -548,6 +548,16 @@ void OptionsSheet::BuildRows()
 	const bool settings = m_tab == kTabSettings;
 	if (settings && (m_has_preset || !m_global))
 		add(Kind::Recommended, m_global ? "Recommended for all games" : "Recommended settings");
+	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): where the games and the
+	// BIOS are, on the sheet for all games (the app runs the picker and the share list). vk-285-135b: at the top (Spyros
+	// looked for them: at the bottom, under the memory cards, they were too far down).
+	if (settings && m_global && m_folder_rows)
+	{
+		add(Kind::Header, "Folders");
+		add(Kind::GameFolders, "Game folders");
+		add(Kind::BiosFolder, "BIOS folder");
+		add(Kind::NfsShares, "NFS shares");
+	}
 	// 2026-10-08 (AI-assisted; testers: "ELF properties: disc path"): an ELF's disc, first, as PCSX2's ELF properties have it.
 	if (settings && m_elf)
 	{
@@ -571,15 +581,6 @@ void OptionsSheet::BuildRows()
 		add(Kind::Card, "Slot 1").slot = 1;
 		add(Kind::Card, "Slot 2").slot = 2;
 		add(Kind::NewCard, "New card");
-	}
-	// vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): where the games and the
-	// BIOS are, on the sheet for all games (the app runs the picker and the share list).
-	if (settings && m_global && m_folder_rows)
-	{
-		add(Kind::Header, "Folders");
-		add(Kind::GameFolders, "Game folders");
-		add(Kind::BiosFolder, "BIOS folder");
-		add(Kind::NfsShares, "NFS shares");
 	}
 	// 2026-10-08 (AI-assisted; testers asked for the PS2's own boot and menu): the PS2's menu with no disc, from the sheet
 	// for all games.

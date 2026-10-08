@@ -304,6 +304,27 @@ const COMBO_BUTTONS = [["L3R3","L3 + R3"],["Cross","Cross"],["Circle","Circle"],
 // A save or load combo: two lists in one row on this page ("pair": the row's name; the sheet has a row for each button).
 const combo = (key, label, def, pair) => ({ key: "PS5SX2/" + key, label, type: "pick", def, options: COMBO_BUTTONS, pair });
 const GROUPS = [
+  // 2026-10-08 (AI-assisted; testers: "have users select their bios and games scan path ... ext/usb or m2"): where the shelf
+  // finds games and the BIOS besides /data/PCSX2 and the drives it looks through by itself (USB 0-7, extended storage and
+  // M.2: /mnt/ext0, /mnt/ext1). For all games only (main-boot.cpp reads gs.ini when PS5SX2 starts). vk-285-135b: the Settings
+  // tab's first group, as on the shelf's sheet (Spyros looked for them at the bottom); the sheet picks these folders with its
+  // own picker (fe_app.cpp), the overlays folder is typed here only.
+  { title: "Folders", global: true, items: [
+    { key: "PS5SX2/GameFolders", label: "More game folders", type: "text", def: "", restart: true, later: "the game folders",
+      placeholder: "/mnt/ext1/PS2;/mnt/usb0/My games",
+      hint: "Folders to list games from, separated by ; (and the folders inside each, one level down). PS5SX2 already looks in /data/PCSX2/games, /data/PCSX2 and every USB, extended storage and M.2 drive (their root, games/, PS2/... and PCSX2/games/). Read when PS5SX2 starts." },
+    // 2026-10-08: the overlay pictures' folder (PS5SX2/Bezel), read live.
+    { key: "PS5SX2/BezelDir", label: "Overlays folder", type: "text", def: "", placeholder: "/mnt/usb0/PS2/overlays",
+      hint: "Optional: where the overlay pictures are looked for first (<game serial>.png, default.png), before /data/PCSX2/overlays." },
+    // vk-285-135 (AI-assisted; testers: "nfs mounting"): games on a PC or NAS share (orbis-shims/OrbisNfs.cpp), mounted
+    // when PS5SX2 starts; each share's games are listed like a drive's.
+    { key: "PS5SX2/NfsShares", label: "NFS shares", type: "text", def: "", restart: true, later: "the NFS shares",
+      placeholder: "nfs://192.168.1.10/volume1/PS2",
+      hint: "Games on a PC or NAS shared over NFS: nfs:// addresses separated by ; (the server, then the shared folder or a folder in it). NFS v3 (Windows: WinNFSd or haneWIN; Linux, Synology, QNAP, TrueNAS), else v4. Add ?version=4, ?nfsport=2049&mountport=1058 or ?uid=1000&gid=1000 when the server needs them. Read-only. Mounted when PS5SX2 starts; boot.log says how it went." },
+    { key: "PS5SX2/BiosFolder", label: "BIOS folder", type: "text", def: "", restart: true, later: "the BIOS folder",
+      placeholder: "/mnt/ext1/PS2/bios",
+      hint: "Where to look for the BIOS first. Without it: /data/PCSX2/bios, then /data/PCSX2 and the drives' bios/ and PCSX2/bios/ folders. Read when PS5SX2 starts." },
+  ]},
   { title: "Display", items: [
     { key: "upscale_multiplier", label: "Resolution", type: "seg", def: "1", short: "%",
       options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"],["8","8x (PS5 Pro)"]],
@@ -428,26 +449,6 @@ const GROUPS = [
     { key: "CropTop", label: "Crop top", type: "seg", def: "0", short: "Crop top %", cols: 5, options: CROP_PX },
     { key: "CropRight", label: "Crop right", type: "seg", def: "0", short: "Crop right %", cols: 5, options: CROP_PX },
     { key: "CropBottom", label: "Crop bottom", type: "seg", def: "0", short: "Crop bottom %", cols: 5, options: CROP_PX },
-  ]},
-  // 2026-10-08 (AI-assisted; testers: "have users select their bios and games scan path ... ext/usb or m2"): where the shelf
-  // finds games and the BIOS besides /data/PCSX2 and the drives it looks through by itself (USB 0-7, extended storage and
-  // M.2: /mnt/ext0, /mnt/ext1). For all games only (main-boot.cpp reads gs.ini when PS5SX2 starts). The sheet has no
-  // keyboard for a path, so it stays on the page, like the textures folder.
-  { title: "Folders", global: true, items: [
-    { key: "PS5SX2/GameFolders", label: "More game folders", type: "text", def: "", restart: true, later: "the game folders",
-      placeholder: "/mnt/ext1/PS2;/mnt/usb0/My games",
-      hint: "Folders to list games from, separated by ; (and the folders inside each, one level down). PS5SX2 already looks in /data/PCSX2/games, /data/PCSX2 and every USB, extended storage and M.2 drive (their root, games/, PS2/... and PCSX2/games/). Read when PS5SX2 starts." },
-    // 2026-10-08: the overlay pictures' folder (PS5SX2/Bezel), read live.
-    { key: "PS5SX2/BezelDir", label: "Overlays folder", type: "text", def: "", placeholder: "/mnt/usb0/PS2/overlays",
-      hint: "Optional: where the overlay pictures are looked for first (<game serial>.png, default.png), before /data/PCSX2/overlays." },
-    // vk-285-135 (AI-assisted; testers: "nfs mounting"): games on a PC or NAS share (orbis-shims/OrbisNfs.cpp), mounted
-    // when PS5SX2 starts; each share's games are listed like a drive's.
-    { key: "PS5SX2/NfsShares", label: "NFS shares", type: "text", def: "", restart: true, later: "the NFS shares",
-      placeholder: "nfs://192.168.1.10/volume1/PS2",
-      hint: "Games on a PC or NAS shared over NFS: nfs:// addresses separated by ; (the server, then the shared folder or a folder in it). NFS v3 (Windows: WinNFSd or haneWIN; Linux, Synology, QNAP, TrueNAS), else v4. Add ?version=4, ?nfsport=2049&mountport=1058 or ?uid=1000&gid=1000 when the server needs them. Read-only. Mounted when PS5SX2 starts; boot.log says how it went." },
-    { key: "PS5SX2/BiosFolder", label: "BIOS folder", type: "text", def: "", restart: true, later: "the BIOS folder",
-      placeholder: "/mnt/ext1/PS2/bios",
-      hint: "Where to look for the BIOS first. Without it: /data/PCSX2/bios, then /data/PCSX2 and the drives' bios/ and PCSX2/bios/ folders. Read when PS5SX2 starts." },
   ]},
   // vk-285-116 (AI-assisted): the Controls tab: the remapping, (vk-285-117) the save and load combos and their hold time
   // (main-boot.cpp orbis_ps5opts_from, orbis-shims/OrbisPadMap.h), the sticks, rumble, the keyboard and mouse.
