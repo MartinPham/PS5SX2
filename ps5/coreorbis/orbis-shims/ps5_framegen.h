@@ -143,6 +143,8 @@ namespace ps5::framegen
 			VkPipelineLayout layout = VK_NULL_HANDLE;
 			VkPipeline pipeline = VK_NULL_HANDLE;
 			std::uint32_t shader = 0; // index into the shader table
+			// PS5SX2: the binding number each of the shader's bindings has here, in its table's order (create(), "compact").
+			std::vector<std::uint32_t> slot;
 		};
 
 		// One dispatch of a frame: its pipeline, its descriptor set (one for each frame parity), the uniform blocks it reads

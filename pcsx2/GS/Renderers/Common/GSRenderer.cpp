@@ -2436,8 +2436,22 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 #ifdef ORBIS_VULKAN
 		// 2026-10-08 (AI-assisted): frame generation (PS5SX2/FrameGeneration; GSDeviceVK.cpp): the frame between the last one and
 		// this one, presented first (as many times as the pacing asks), PS5SX2's overlays over it as over the game's own frames.
-		// Needs proper testing.
-		if (current && !blank_frame && g_orbis_fg_wanted)
+		// Only for a new frame of the game, as the internal FPS counts them (what "Skip duplicate frames" skips): a vsync that
+		// shows the last frame again (a 30 fps game with the skip off, or after 3 skips) presents it as before, and the
+		// interpolator keeps its two frames. Needs proper testing.
+		bool fg_new_frame = true;
+		switch (PerformanceMetrics::GetInternalFPSMethod())
+		{
+			case PerformanceMetrics::InternalFPSMethod::GSPrivilegedRegister:
+				fg_new_frame = registers_written;
+				break;
+			case PerformanceMetrics::InternalFPSMethod::DISPFBBlit:
+				fg_new_frame = fb_sprite_frame;
+				break;
+			default:
+				break;
+		}
+		if (current && !blank_frame && g_orbis_fg_wanted && fg_new_frame)
 		{
 			const float fg_time = static_cast<float>(
 				Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - m_shader_time_start));
