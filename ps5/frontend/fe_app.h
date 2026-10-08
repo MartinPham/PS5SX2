@@ -159,6 +159,11 @@ private:
 		float scroll = 0, scroll_target = 0;
 		bool typing = false; // the PS5's keyboard is open for a share's address
 		std::string editing;  // vk-285-138: the share being changed (empty: a new one)
+		// vk-285-139: the panel's own keyboard for the address, where the PS5's won't open (libSceImeDialog doesn't load in
+		// every jailbreak's process: swordpdf's 138 log, "load 0x80020063").
+		bool osk = false;
+		std::string osk_text;
+		int osk_page = 0, osk_row = 1, osk_col = 0;
 		int held = 0;
 		double held_for = 0, next_repeat = 0;
 	};
@@ -170,6 +175,11 @@ private:
 	void UpdateAccount(const Input& in);
 	void BuildAccount(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent);
 	void BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, float w, float k);
+	// vk-285-139: the panel's keyboard for any field: its title, page and focused key.
+	void BuildPanelKeyboard(std::vector<UiVertex>& ui, float x, float y, float w, float k, const std::string& title, int page, int key_row,
+		int key_col);
+	void BuildPickerKeyboard(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent);
+	void FinishShareText(int result, std::string text);
 	void Pose(float d, float t, Mat4& model, float& brightness) const;
 
 	Renderer* m_renderer = nullptr;

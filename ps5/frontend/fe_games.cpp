@@ -1167,4 +1167,120 @@ bool ShowHiddenGames(const std::string& gs_ini)
 {
 	return IniValue(gs_ini, "PS5SX2/ShowHiddenGames") == "true";
 }
+
+// vk-285-139 (AI-assisted; swordpdf: "multi-disc and disc-change support"). Needs proper testing on the console.
+int DiscNumber(const std::string& name, std::string* rest)
+{
+	std::string stem = name;
+	const size_t dot = stem.rfind('.');
+	if (dot != std::string::npos && dot > 0)
+		stem.erase(dot);
+	const std::string low = Lower(stem);
+	int n = 0;
+	size_t at = std::string::npos, end = 0;
+	for (size_t p = low.find("(disc"); p != std::string::npos; p = low.find("(disc", p + 1))
+	{
+		size_t q = p + 5;
+		while (q < low.size() && low[q] == ' ')
+			q++;
+		size_t d = q;
+		while (d < low.size() && std::isdigit(static_cast<unsigned char>(low[d])))
+			d++;
+		if (d == q || d - q > 2)
+			continue;
+		size_t e = d;
+		if (low.compare(e, 4, " of ") == 0)
+		{
+			e += 4;
+			const size_t m = e;
+			while (e < low.size() && std::isdigit(static_cast<unsigned char>(low[e])))
+				e++;
+			if (e == m)
+				continue;
+		}
+		if (e >= low.size() || low[e] != ')')
+			continue;
+		n = std::atoi(low.c_str() + q);
+		at = p;
+		end = e + 1;
+		break;
+	}
+	if (rest)
+	{
+		std::string r = at == std::string::npos ? low : low.substr(0, at) + low.substr(end);
+		std::string out;
+		for (char c : r) // the space either side of the tag counts once
+			if (!(c == ' ' && !out.empty() && out.back() == ' '))
+				out += c;
+		*rest = Trim(out);
+	}
+	return n;
+}
+
+std::vector<std::string> DiscSet(const std::string& path)
+{
+	const size_t slash = path.rfind('/');
+	const std::string dir = slash == std::string::npos ? std::string(".") : path.substr(0, slash);
+	const std::string name = slash == std::string::npos ? path : path.substr(slash + 1);
+	auto is_file = [](const std::string& p) {
+		struct stat st = {};
+		return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+	};
+	std::vector<std::string> m3us, images;
+	if (DIR* d = opendir(dir.c_str()))
+	{
+		while (const dirent* e = readdir(d))
+		{
+			if (e->d_name[0] == '.')
+				continue;
+			if (HasExtension(e->d_name, ".m3u"))
+				m3us.emplace_back(e->d_name);
+			else if (IsDiscImageName(e->d_name) && !IsElfName(e->d_name))
+				images.emplace_back(e->d_name);
+		}
+		closedir(d);
+	}
+	std::sort(m3us.begin(), m3us.end());
+	for (const std::string& m : m3us)
+	{
+		FILE* f = std::fopen((dir + "/" + m).c_str(), "r");
+		if (!f)
+			continue;
+		std::vector<std::string> list;
+		bool lists_this = false;
+		char line[1024];
+		while (std::fgets(line, sizeof(line), f))
+		{
+			std::string l = Trim(line);
+			if (l.empty() || l[0] == '#')
+				continue;
+			const std::string p = l[0] == '/' ? l : dir + "/" + l;
+			if (!is_file(p))
+				continue;
+			lists_this = lists_this || p == path || l == name;
+			list.push_back(p);
+		}
+		std::fclose(f);
+		if (lists_this && list.size() > 1)
+			return list;
+	}
+	std::string key;
+	if (DiscNumber(name, &key) == 0)
+		return {path};
+	std::vector<std::pair<int, std::string>> found;
+	for (const std::string& img : images)
+	{
+		std::string k;
+		const int n = DiscNumber(img, &k);
+		if (n > 0 && k == key && std::none_of(found.begin(), found.end(), [n](const auto& x) { return x.first == n; }))
+			found.emplace_back(n, img == name ? path : dir + "/" + img);
+	}
+	std::sort(found.begin(), found.end());
+	std::vector<std::string> out;
+	for (const auto& f : found)
+		out.push_back(f.second);
+	if (std::find(out.begin(), out.end(), path) == out.end())
+		out.insert(out.begin(), path);
+	return out;
+}
 } // namespace fe

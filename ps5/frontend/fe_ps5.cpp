@@ -1486,6 +1486,9 @@ bool orbis_web_start(const OrbisFrontendPaths& paths, const char* build_tag)
 	cfg.memcards_dir = paths.memcards_dir; // vk-285-113
 	cfg.report_header = paths.report_header;
 	cfg.test_build = paths.test_build;
+	cfg.current_disc = orbis_current_disc; // vk-285-139 (main-boot.cpp)
+	cfg.disc_set = orbis_disc_set;
+	cfg.change_disc = orbis_request_disc;
 #ifdef PS5SX2_ACHIEVEMENTS
 	cfg.achievements = Achievements::GetPS5GameAchievements;
 	cfg.achievement_badge = Achievements::GetPS5AchievementBadge;

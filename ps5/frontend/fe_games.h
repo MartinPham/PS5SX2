@@ -82,4 +82,12 @@ void ReadBadges(GameInfo& g, const std::string& settings_dir, const std::string&
 
 // vk-285-137: gs.ini's PS5SX2/ShowHiddenGames (the sheet for all games): hidden games stay on the shelf, dimmed.
 bool ShowHiddenGames(const std::string& gs_ini);
+
+// vk-285-139 (AI-assisted): a game's discs, for changing discs in the game. The images an .m3u in the image's folder lists
+// (in its order, relative to it or full paths) when one lists this image; else the disc images beside it whose names
+// differ only in "(Disc N)" or "(Disc N of M)" (Redump's naming; any image type), by N; else just the image.
+std::vector<std::string> DiscSet(const std::string& path);
+// N of "(Disc N)" / "(Disc N of M)" in a file name (any case), 0 when there's none; `rest`: the name without it and its
+// extension, for comparing.
+int DiscNumber(const std::string& name, std::string* rest);
 } // namespace fe

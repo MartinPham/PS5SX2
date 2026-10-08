@@ -62,6 +62,11 @@ struct WebConfig
 	std::function<GameAchievementsState()> achievements; // Runtime snapshot, no client pointers (AI-assisted).
 	std::function<std::vector<uint8_t>(uint32_t)> achievement_badge;
 	int test_build = 0;                 // names the report file "PS5SX2-test<N>-..."
+	// vk-285-139: changing discs while a game runs (/api/discs, /api/disc). The disc in now and the game's set ("" and empty
+	// in the menu); change_disc asks for one (any image the page lists), false when no game runs.
+	std::function<std::string()> current_disc;
+	std::function<std::vector<std::string>()> disc_set;
+	std::function<bool(const std::string& path)> change_disc;
 };
 
 // vk-285-51: appends "<date time>  <line>" to the settings log (logs/settings.log), which keeps
@@ -140,6 +145,8 @@ private:
 	void ApiRecommended(const Request& req, const GameInfo* g, const std::string& path, Response& res);
 	void ApiReport(const Request& req, Response& res); // test build 1: one text file with the logs
 	void ApiNote(const Request& req, Response& res);   // test build 1: a tester's note, into settings.log
+	void ApiDiscs(Response& res);                      // vk-285-139: the disc in, the game's discs and every image
+	void ApiDisc(const Request& req, Response& res);   // vk-285-139: put one in (the body: its path)
 	void ApiMemcards(Response& res);                   // vk-285-113: the cards in memcards/
 	void ApiMemcardCreate(const Request& req, Response& res); // vk-285-113: "create <8|16|32|64> <name>"
 	void Log(const Request& req, const std::string& what);

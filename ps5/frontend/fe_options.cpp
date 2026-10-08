@@ -230,6 +230,7 @@ std::vector<OptionDef> ButtonsGroup()
 									  "left or right: a finger on that side. Nothing, or the same button twice, makes it one button. F3 on a "
 									  "keyboard loads too.";
 	constexpr const char* fast_hint = "Experimental, for skipping videos: hold both fast forward buttons together (for the hold time above) to run the game as fast as it goes, and again to go back to full speed. Nothing on both: no fast forward button. Sound may skip while it's on.";
+	constexpr const char* disc_hint = "Hold both change disc buttons together to put in the game's next disc: images named \"(Disc 1)\", \"(Disc 2)\"... in the same folder, or listed in an .m3u file, are one game's discs. Any image (a GameShark disc's game, say) goes in from the settings page's Disc section while you play. Nothing on both: no change disc button.";
 	std::vector<OptionDef> out = {
 		Seg("PS5SX2/SaveButton1", "Save: button 1", "L3R3", "", ComboChoices(), save_hint),
 		Seg("PS5SX2/SaveButton2", "Save: button 2", "Up", "", ComboChoices(), save_hint),
@@ -242,6 +243,9 @@ std::vector<OptionDef> ButtonsGroup()
 		Seg("PS5SX2/FastButton1", "Fast forward: button 1", "None", "", ComboChoices(), fast_hint),
 		Seg("PS5SX2/FastButton2", "Fast forward: button 2", "None", "", ComboChoices(), fast_hint),
 		Seg("PS5SX2/FastSpeed", "Fast forward speed", "0", "", {{"0", "Max"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}}, "How fast fast forward runs. Max: as fast as the console can. Some games' videos skip only at Max."),
+		// vk-285-139: change disc, for games on more than one disc.
+		Seg("PS5SX2/DiscButton1", "Change disc: button 1", "L3R3", "", ComboChoices(), disc_hint),
+		Seg("PS5SX2/DiscButton2", "Change disc: button 2", "Right", "", ComboChoices(), disc_hint),
 	};
 	for (OptionDef& d : ButtonRows())
 		out.push_back(std::move(d));
@@ -337,6 +341,15 @@ const std::vector<OptionGroup>& OptionGroups()
 					"Puts the games hidden from the shelf back on it, dimmed, so you can open one's sheet and turn Hide from the shelf off."),
 			},
 			kTabSettings, false, true},
+		// vk-285-139 (AI-assisted; swordpdf: a GameShark disc for all games, "it would have to be disc 1 at all times"): games
+		// start from the cheat disc (picked on the sheet for all games), the game's own discs after it: the change disc combo
+		// or the settings page puts the game's disc in when the cheat disc asks for it.
+		{"Discs",
+			{
+				Toggle("PS5SX2/CheatDiscStart", "Start from the cheat disc", "false", "Cheat disc %",
+					"Starts the game from the cheat disc (a GameShark, say: Cheat disc, on the sheet for all games), as disc 1, with the game's own discs after it. When it asks for the game's disc, hold the change disc buttons (Controls; L3 + R3 + D-pad right by default) or pick the disc on the settings page. Its codes stay on the memory card.", true),
+			},
+			kTabSettings},
 		{"Display",
 			{
 				Seg("upscale_multiplier", "Resolution", "1", "%", {{"1", "1x"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {"5", "5x"}, {"6", "6x"},
@@ -584,6 +597,9 @@ void OptionsSheet::BuildRows()
 		if (g.tab != m_tab || (g.game_only && m_global) || (g.global_only && !m_global))
 			continue;
 		add(Kind::Header, g.title);
+		// vk-285-139: the cheat disc itself, on the sheet for all games, before its switch.
+		if (g.title == "Discs" && m_global)
+			add(Kind::CheatDisc, "Cheat disc");
 		for (const OptionDef& d : g.items)
 			add(Kind::Option, d.label).def = &d;
 		// 2026-10-05 (AI-assisted): the game's HD texture pack, under Texture replacements.
@@ -710,6 +726,16 @@ std::string OptionsSheet::Value(const Row& r) const
 			const size_t n = SplitFolderList(OwnValue(kNfsSharesKey)).size();
 			return n == 0 ? "None" : n == 1 ? "1 share" : std::to_string(n) + " shares";
 		}
+		case Kind::CheatDisc: // vk-285-139
+		{
+			const std::string* v = Find(m_own, kCheatDiscKey);
+			if (!v || v->empty())
+				return "None";
+			for (const auto& [file, title] : m_paths.disc_images)
+				if (file == *v)
+					return title;
+			return *v;
+		}
 		case Kind::ElfDisc:
 		{
 			const std::string* v = Find(m_own, kElfDiscKey);
@@ -750,6 +776,8 @@ OptionsSheet::From OptionsSheet::Source(const Row& r) const
 			return SameState(m_own, ReadState(m_preset)) ? From::Own : From::Default;
 		case Kind::ElfDisc:
 			return Find(m_own, kElfDiscKey) ? From::Own : From::Default;
+		case Kind::CheatDisc:
+			return Find(m_own, kCheatDiscKey) ? From::Own : From::Default;
 		case Kind::GameFolders: // vk-285-135
 			return OwnValue(kGameFoldersKey).empty() ? From::Default : From::Own;
 		case Kind::BiosFolder:
@@ -845,6 +873,8 @@ std::string OptionsSheet::Help(const Row& r) const
 		case Kind::Cheat:
 			return (r.patch_desc.empty() ? std::string("A cheat from the cheats folder.") : r.patch_desc) +
 			       " Turning a cheat on turns on cheats for this game; cheats are left out in hardcore RetroAchievements mode.";
+		case Kind::CheatDisc:
+			return "A cheat disc (a GameShark, Action Replay or CodeBreaker image on the shelf), left and right to pick it. Games with Start from the cheat disc on start from it, as disc 1, with their own discs after it: hold the change disc buttons (Controls) when it asks for the game's disc. Triangle: none.";
 		case Kind::ElfDisc:
 			return "The disc image this ELF runs with, as PCSX2's ELF properties set it: a patched or translated game's executable "
 			       "with its own disc, or homebrew that reads one. No disc: the ELF alone. Used when it starts.";
@@ -999,12 +1029,14 @@ bool OptionsSheet::Step(const Row& r, int dir)
 		case Kind::Cheat:
 			return SetCheat(r.label, !CheatOn(r.label));
 		case Kind::ElfDisc:
+		case Kind::CheatDisc: // vk-285-139: the same list, in gs.ini
 		{
+			const char* const key = r.kind == Kind::CheatDisc ? kCheatDiscKey : kElfDiscKey;
 			// No disc, then the shelf's disc images in its order (and the one set, when it isn't on the shelf now).
 			std::vector<std::string> list = {""};
 			for (const auto& image : m_paths.disc_images)
 				list.push_back(image.first);
-			const std::string* v = Find(m_own, kElfDiscKey);
+			const std::string* v = Find(m_own, key);
 			const std::string cur = v ? *v : std::string();
 			if (!cur.empty() && std::find(list.begin(), list.end(), cur) == list.end())
 				list.push_back(cur);
@@ -1012,8 +1044,8 @@ bool OptionsSheet::Step(const Row& r, int dir)
 			const int at = static_cast<int>(std::find(list.begin(), list.end(), cur) - list.begin());
 			const std::string& next = list[static_cast<size_t>(((at + dir) % n + n) % n)];
 			if (next.empty())
-				return v ? Save({{Change::Unset, kElfDiscKey, {}}}) : false;
-			return Save({{Change::Set, kElfDiscKey, next}});
+				return v ? Save({{Change::Unset, key, {}}}) : false;
+			return Save({{Change::Set, key, next}});
 		}
 		default:
 			return false;
@@ -1110,6 +1142,10 @@ bool OptionsSheet::Reset(const Row& r)
 			if (!Find(m_own, kElfDiscKey))
 				return false;
 			return Save({{Change::Unset, kElfDiscKey, {}}});
+		case Kind::CheatDisc:
+			if (!Find(m_own, kCheatDiscKey))
+				return false;
+			return Save({{Change::Unset, kCheatDiscKey, {}}});
 		case Kind::BiosFolder: // vk-285-135
 			if (OwnValue(kBiosFolderKey).empty())
 				return false;

@@ -57,6 +57,10 @@ header { display: flex; align-items: flex-start; justify-content: space-between;
 .icon.x { --src: url("/icons/x-twitter.svg"); width: 13px; }
 .clock { font-size: 22px; color: var(--dim); padding-top: 3px; font-variant-numeric: tabular-nums; }
 
+/* vk-285-139: Now playing's disc row */
+.discrow { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+.discrow .pick { max-width: 100%; flex: 1 1 220px; }
+.discrow.hide { display: none; }
 /* Now playing */
 .now { margin-top: 22px; display: none; align-items: center; gap: 14px; padding: 12px; border-radius: 16px;
        background: var(--card); border: 1px solid var(--card-line); }
@@ -239,6 +243,7 @@ footer a { color: var(--dim); }
         <div class="k"><span class="dot"></span>Now playing</div>
         <div class="t" id="nowtitle"></div>
         <div class="s">Changes to its settings apply live.</div>
+        <div class="discrow hide" id="discrow"><select class="pick" id="discpick" aria-label="Disc"></select><button class="btn" id="discbtn">Put this disc in</button></div>
       </div>
     </div>
 
@@ -335,6 +340,11 @@ const GROUPS = [
   { title: "Shelf", global: true, items: [
     { key: "PS5SX2/ShowHiddenGames", label: "Show hidden games", type: "toggle", def: "false", short: "Hidden games %",
       hint: "Puts the games hidden from the shelf back on it, dimmed, so you can open one and turn Hide from the shelf off. Set here, it applies the next time the shelf opens." },
+  ]},
+  // vk-285-139: games start from the cheat disc (a GameShark: picked under it, all games), the game's own discs after it.
+  { title: "Discs", items: [
+    { key: "PS5SX2/CheatDiscStart", label: "Start from the cheat disc", type: "toggle", def: "false", short: "Cheat disc %", restart: true, later: "the cheat disc",
+      hint: "Starts the game from the cheat disc (a GameShark, say: Cheat disc, in the settings for all games), as disc 1, with the game's own discs after it. When it asks for the game's disc, hold the change disc buttons (Controls; L3 + R3 + D-pad right by default) or pick the disc under Now playing. Its codes stay on the memory card." },
   ]},
   { title: "Display", items: [
     { key: "upscale_multiplier", label: "Resolution", type: "seg", def: "1", short: "%",
@@ -464,7 +474,7 @@ const GROUPS = [
   // vk-285-116 (AI-assisted): the Controls tab: the remapping, (vk-285-117) the save and load combos and their hold time
   // (main-boot.cpp orbis_ps5opts_from, orbis-shims/OrbisPadMap.h), the sticks, rumble, the keyboard and mouse.
   { title: "Buttons", tab: "controls",
-    hint: "Save and load: hold the two buttons together (slot 1). L3 + R3 is both sticks pressed in; Touchpad left or right is a finger on that side. Fast forward (experimental, for skipping videos): hold its two buttons to speed the game up, and again for full speed; Nothing on both turns it off. Below: what each button presses in games (Light press: the other buttons press at half strength, for Metal Gear Solid 2 and 3). PS5SX2's own combos always use the real buttons.",
+    hint: "Save and load: hold the two buttons together (slot 1). L3 + R3 is both sticks pressed in; Touchpad left or right is a finger on that side. Fast forward (experimental, for skipping videos): hold its two buttons to speed the game up, and again for full speed; Nothing on both turns it off. Change disc: hold its two buttons for the game's next disc (\"(Disc 2)\" beside it, or an .m3u list); any image goes in from the Disc section while you play. Below: what each button presses in games (Light press: the other buttons press at half strength, for Metal Gear Solid 2 and 3). PS5SX2's own combos always use the real buttons.",
     items: [
     combo("SaveButton1", "Save: button 1", "L3R3", "Save state"), combo("SaveButton2", "Save: button 2", "Up"),
     combo("LoadButton1", "Load: button 1", "L3R3", "Load state"), combo("LoadButton2", "Load: button 2", "Down"),
@@ -475,6 +485,7 @@ const GROUPS = [
     { key: "PS5SX2/FastSpeed", label: "Fast forward speed", type: "seg", def: "0", cols: 4,
       options: [["0","Max"],["2","2x"],["3","3x"],["4","4x"]],
       hint: "How fast fast forward runs. Max: as fast as the console can. Some games' videos skip only at Max." },
+    combo("DiscButton1", "Change disc: button 1", "L3R3", "Change disc"), combo("DiscButton2", "Change disc: button 2", "Right"),
     button("Cross", "Cross", "Cross"), button("Circle", "Circle", "Circle"), button("Square", "Square", "Square"),
     button("Triangle", "Triangle", "Triangle"), button("L1", "L1", "L1"), button("R1", "R1", "R1"), button("L2", "L2", "L2"),
     button("R2", "R2", "R2"), button("L3", "L3", "L3"), button("R3", "R3", "R3"), button("Options", "Options", "Start"),
@@ -847,6 +858,18 @@ function render() {
       '<div class="hint">The disc image this ELF runs with, as PCSX2\'s ELF properties set it: a patched or translated game\'s executable with its own disc, or homebrew that reads one. No disc: the ELF alone.</div></div>' +
       '<select class="pick' + (cur ? " moved" : " inh") + '" data-elfdisc="1" aria-label="Disc image">' + opts + "</select></div></div></div>";
   }
+  // vk-285-139: the cheat disc (PS5SX2/CheatDisc in gs.ini), one of the shelf's images by its file name, as the sheet's row.
+  if (tab === "settings" && isGlobal) {
+    const cur = data.values["PS5SX2/CheatDisc"] || "";
+    let opts = '<option value=""' + (cur ? "" : " selected") + ">None</option>";
+    for (const g of games)
+      if (!/\.elf$/i.test(g.id)) opts += '<option value="' + esc(g.id) + '"' + (g.id === cur ? " selected" : "") + ">" + esc(g.title) + "</option>";
+    if (cur && !games.some((g) => g.id === cur)) opts += '<option value="' + esc(cur) + '" selected>' + esc(cur) + "</option>";
+    html += '<div class="sec"><h2>Cheat disc</h2><div class="card"><div class="row prow"><div class="pl"><div class="label">Cheat disc' +
+      '<span class="tag">next launch</span></div><div class="from" style="margin-top:2px">' + (cur ? "set" : "none") + "</div>" +
+      '<div class="hint">A GameShark, Action Replay or CodeBreaker image. Games with Start from the cheat disc on (Discs) start from it as disc 1, with their own discs after it.</div></div>' +
+      '<select class="pick' + (cur ? " moved" : " inh") + '" data-cheatdisc="1" aria-label="Cheat disc">' + opts + "</select></div></div></div>";
+  }
   for (const grp of GROUPS) {
     if ((grp.tab || "settings") !== tab) continue; // vk-285-116
     if (grp.global && !isGlobal) continue; // 2026-10-08: a group for all games only (Folders)
@@ -962,6 +985,7 @@ function render() {
   }));
   $("settings").querySelectorAll("[data-pickkey]").forEach((el) => el.addEventListener("change", () => change(el.dataset.pickkey, el.value)));
   $("settings").querySelectorAll("[data-elfdisc]").forEach((el) => el.addEventListener("change", () => change("PS5SX2/ElfDisc", el.value || null)));
+  $("settings").querySelectorAll("[data-cheatdisc]").forEach((el) => el.addEventListener("change", () => change("PS5SX2/CheatDisc", el.value || null)));
   $("settings").querySelectorAll("[data-mcd]").forEach((el) => el.addEventListener("change", () => mcdChoose(SLOTS[+el.dataset.mcd - 1], el.value)));
   $("settings").querySelectorAll("[data-mcdreset]").forEach((b) => b.addEventListener("click", () => mcdChoose(SLOTS[+b.dataset.mcdreset - 1], "")));
   $("settings").querySelectorAll("[data-mcdsize]").forEach((b) => b.addEventListener("click", () => { mcdSize = +b.dataset.mcdsize; render(); }));
@@ -1139,6 +1163,37 @@ async function refreshGames() {
   } catch (e) {}
 }
 
+// vk-285-139 (AI-assisted): Now playing's disc row: the game's discs, then every image on the console (a GameShark's game).
+let discsLoaded = false;
+async function refreshDiscs() {
+  const row = $("discrow"), pick = $("discpick");
+  if (!state.playing) { row.classList.add("hide"); discsLoaded = false; return; }
+  try {
+    const d = await api("/api/discs");
+    discsLoaded = true;
+    let html = "";
+    if (d.set.length > 1) {
+      html += '<optgroup label="This game\'s discs">';
+      d.set.forEach((s, i) => { html += '<option value="' + esc(s.path) + '"' + (s.path === d.current ? " selected" : "") + ">Disc " + (i + 1) + (s.path === d.current ? " (in now)" : "") + " · " + esc(s.name) + "</option>"; });
+      html += "</optgroup>";
+    }
+    html += '<optgroup label="Any image">';
+    for (const g of d.games) html += '<option value="' + esc(g.path) + '"' + (d.set.length <= 1 && g.path === d.current ? " selected" : "") + ">" + esc(g.title) + (g.path === d.current ? " (in now)" : "") + "</option>";
+    html += "</optgroup>";
+    pick.innerHTML = html;
+    row.classList.remove("hide");
+  } catch (e) { row.classList.add("hide"); }
+}
+$("discbtn").addEventListener("click", async () => {
+  const path = $("discpick").value;
+  if (!path) return;
+  try {
+    await api("/api/disc", { method: "POST", headers: { "Content-Type": "text/plain" }, body: path });
+    toast("Disc changed");
+    setTimeout(refreshDiscs, 1500);
+  } catch (e) { toast(e.message); }
+});
+
 async function refreshState() {
   try {
     const s = await api("/api/state");
@@ -1148,6 +1203,7 @@ async function refreshState() {
     $("build").textContent = s.build;
     if (s.playing) { $("now").classList.add("show"); $("nowtitle").textContent = s.playing.title; $("nowcover").src = cover(s.playing.id); }
     else $("now").classList.remove("show");
+    if (changed || !discsLoaded) refreshDiscs();
     if (changed && games.length) {
       games = await api("/api/games");
       buildFlow();

@@ -258,6 +258,8 @@ struct Config
 	// vk-285-118: the fast forward combo (PS5SX2/FastButton1/2, experimental, to skip videos): it turns fast forward on and
 	// off, after the same hold time. Nothing on both (the default): no combo.
 	ComboButton fast[2] = {CB_NONE, CB_NONE};
+	// vk-285-139: the change disc combo (PS5SX2/DiscButton1/2): the next disc of the game's set ("(Disc 2)" beside it).
+	ComboButton disc[2] = {CB_L3R3, CB_RIGHT};
 
 	Config()
 	{
@@ -276,7 +278,7 @@ struct Config
 		return swap_sticks == o.swap_sticks && left_dpad == o.left_dpad && deadzone_left == o.deadzone_left &&
 		       deadzone_right == o.deadzone_right && invert_left == o.invert_left && invert_right == o.invert_right &&
 		       save[0] == o.save[0] && save[1] == o.save[1] && load[0] == o.load[0] && load[1] == o.load[1] && hold_ms == o.hold_ms &&
-		       fast[0] == o.fast[0] && fast[1] == o.fast[1];
+		       fast[0] == o.fast[0] && fast[1] == o.fast[1] && disc[0] == o.disc[0] && disc[1] == o.disc[1];
 	}
 	bool operator!=(const Config& o) const { return !(*this == o); }
 	bool IsDefault() const { return *this == Config(); }
@@ -345,9 +347,10 @@ inline Config FromSettings(Get get)
 	if (get("InvertRight", v))
 		c.invert_right = SmallInt(v, 3);
 	// vk-285-117: the save and load combos; a value that isn't a button leaves that one at its default.
-	static const char* const combo_keys[6] = {"SaveButton1", "SaveButton2", "LoadButton1", "LoadButton2", "FastButton1", "FastButton2"};
-	ComboButton* const combo[6] = {&c.save[0], &c.save[1], &c.load[0], &c.load[1], &c.fast[0], &c.fast[1]};
-	for (int i = 0; i < 6; i++)
+	static const char* const combo_keys[8] = {"SaveButton1", "SaveButton2", "LoadButton1", "LoadButton2", "FastButton1", "FastButton2",
+		"DiscButton1", "DiscButton2"};
+	ComboButton* const combo[8] = {&c.save[0], &c.save[1], &c.load[0], &c.load[1], &c.fast[0], &c.fast[1], &c.disc[0], &c.disc[1]};
+	for (int i = 0; i < 8; i++)
 	{
 		v.clear();
 		ComboButton b;

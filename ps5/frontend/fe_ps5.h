@@ -83,6 +83,10 @@ int orbis_frontend_prefetch_covers(const OrbisFrontendPaths& paths, double budge
 bool orbis_web_start(const OrbisFrontendPaths& paths, const char* build_tag);
 // The disc image PCSX2 runs, for the page's "now playing".
 void orbis_web_now_playing(const std::string& image_path);
+// vk-285-139 (main-boot.cpp): the running game's disc, its discs, and a disc the settings page asks for (false: no game).
+std::string orbis_current_disc();
+std::vector<std::string> orbis_disc_set();
+bool orbis_request_disc(const std::string& path);
 // vk-285-113: the page's address as the QR code the shelf shows: `modules` (one byte a module, row by row), its
 // side length in `size`, and the short "<ip>:<port>" in `shown`. GSRenderer.cpp draws it over the game when the
 // PS5's browser can't be opened (L2 + D-pad down held for 2 s). False without a web server or a network.

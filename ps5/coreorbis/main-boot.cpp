@@ -32,6 +32,7 @@
 #include "../frontend/fe_ps5.h"
 #include "../frontend/fe_i18n.h" // vk-285-110: the notifications' text
 #include "../frontend/fe_bios.h" // vk-285-134: the BIOS before the shelf
+#include "../frontend/fe_games.h" // vk-285-139: fe::DiscSet
 #include "ps2/BiosTools.h"       // vk-285-134: IsBIOS, IsBIOSAvailable
 #endif // vk-285-36/38: [vkwait], [shaders]
 extern volatile unsigned long long g_orbis_map_addr;
@@ -824,7 +825,7 @@ static void *orbis_pad_thread(void *)
       bool state_fired = false;
       {
         const orbis_padmap::Config &cfg = orbis_padmap_current();
-        static orbis_padmap::ComboWatch s_save, s_load, s_fast;
+        static orbis_padmap::ComboWatch s_save, s_load, s_fast, s_disc;
         orbis_padmap::ComboState cs;
         cs.buttons = d.buttons;
         cs.l2 = d.l2;
@@ -840,6 +841,15 @@ static void *orbis_pad_thread(void *)
         const bool load = s_load.Update(cfg.load, cfg.hold_ms, cs, now_ms, block) && !save;
         // vk-285-118: the fast forward combo (StubHost.cpp turns it on or off on the CPU thread).
         const bool fast = s_fast.Update(cfg.fast, cfg.hold_ms, cs, now_ms, block) && !save && !load;
+        // vk-285-139: the change disc combo (the next disc of the game's set; StubHost.cpp runs it on the CPU thread).
+        const bool disc = s_disc.Update(cfg.disc, cfg.hold_ms, cs, now_ms, block) && !save && !load && !fast;
+        if (disc)
+        {
+          g_orbis_state_request.store(6, std::memory_order_release);
+          state_fired = true;
+          printf("[pad] change disc: %s\n", orbis_padmap::DescribeCombo(cfg.disc, cfg.hold_ms).c_str());
+          fflush(stdout);
+        }
         if (fast)
         {
           g_orbis_state_request.store(4, std::memory_order_release);
@@ -2073,6 +2083,7 @@ static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
 // 2026-10-08 (AI-assisted): an ELF's disc image (PS5SX2/ElfDisc in its settings file): a full path, or a file name the shelf
 // lists, looked for in the folders it lists games from (games/, /data/PCSX2, the drives' and the extra folders) and one folder
 // down in each, the first found winning as on the shelf. "" when unset or not found.
+static std::string orbis_find_image(const std::string& want, const char* what);
 static std::string orbis_elf_disc()
 {
   if (s_game_ini_path.empty())
@@ -2082,13 +2093,20 @@ static std::string orbis_elf_disc()
   std::string want;
   if (!peek.GetStringValue("PS5SX2", "ElfDisc", &want) || want.empty())
     return {};
+  return orbis_find_image(want, "the ELF's disc");
+}
+
+// A disc image by the name the shelf's rows store (its file name: found in the game folders and one folder down), or a
+// full path. "" when it isn't there (and the log says so).
+static std::string orbis_find_image(const std::string& want, const char* what)
+{
   struct stat st = {};
   const auto is_file = [&](const std::string& p) { return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode); };
   if (want.find('/') != std::string::npos)
   {
     if (is_file(want))
       return want;
-    printf("[boot] the ELF's disc %s isn't there\n", want.c_str());
+    printf("[boot] %s %s isn't there\n", what, want.c_str());
     return {};
   }
   std::vector<std::string> dirs = {OrbisDir("games"), "/data/PCSX2"};
@@ -2117,8 +2135,130 @@ static std::string orbis_elf_disc()
     if (!found.empty())
       return found;
   }
-  printf("[boot] the ELF's disc %s isn't in the game folders\n", want.c_str());
+  printf("[boot] %s %s isn't in the game folders\n", what, want.c_str());
   return {};
+}
+
+// vk-285-139 (AI-assisted; swordpdf: "multi-disc and disc-change support (to even support gameshark iso)", the cheat disc "would
+// have to be disc 1 at all times"). The discs the running game can change to: the cheat disc first when the game starts from
+// it (PS5SX2/CheatDiscStart, its own file or gs.ini; PS5SX2/CheatDisc in gs.ini), then the game's own (fe::DiscSet: "(Disc N)"
+// beside it, or an .m3u). The change disc combo (request 6) puts the next one in, the settings page any image (request 5).
+// Needs proper testing on the console (a GameShark's disc swap, a two-disc game).
+static std::mutex s_disc_mutex;
+static std::vector<std::string> s_disc_set;
+static std::string s_disc_current, s_disc_request;
+
+std::string orbis_current_disc()
+{
+  std::lock_guard<std::mutex> lock(s_disc_mutex);
+  return s_disc_current;
+}
+
+std::vector<std::string> orbis_disc_set()
+{
+  std::lock_guard<std::mutex> lock(s_disc_mutex);
+  return s_disc_set;
+}
+
+bool orbis_request_disc(const std::string& path)
+{
+  {
+    std::lock_guard<std::mutex> lock(s_disc_mutex);
+    if (s_disc_current.empty())
+      return false; // no game (or the PS2 menu, or an ELF with no disc)
+    s_disc_request = path;
+  }
+  g_orbis_state_request.store(5, std::memory_order_release);
+  return true;
+}
+
+// The CPU thread (StubHost.cpp's PumpMessagesOnCPUThread), between frames.
+void OrbisChangeDiscCpu(int req)
+{
+  std::string to;
+  int number = 0, count = 0;
+  {
+    std::lock_guard<std::mutex> lock(s_disc_mutex);
+    count = static_cast<int>(s_disc_set.size());
+    if (req == 6)
+    {
+      if (count < 2)
+      {
+        OrbisOSDLabel("ONE DISC");
+        printf("[disc] change disc: this game has one disc\n");
+        fflush(stdout);
+        return;
+      }
+      const auto at = std::find(s_disc_set.begin(), s_disc_set.end(), s_disc_current);
+      const int i = at == s_disc_set.end() ? -1 : static_cast<int>(at - s_disc_set.begin());
+      to = s_disc_set[static_cast<size_t>((i + 1) % count)];
+    }
+    else
+    {
+      to.swap(s_disc_request);
+    }
+    const auto in = std::find(s_disc_set.begin(), s_disc_set.end(), to);
+    number = in == s_disc_set.end() ? 0 : static_cast<int>(in - s_disc_set.begin()) + 1;
+  }
+  if (to.empty())
+    return;
+  const bool ok = VMManager::ChangeDisc(CDVD_SourceType::Iso, to);
+  if (ok)
+  {
+    std::lock_guard<std::mutex> lock(s_disc_mutex);
+    s_disc_current = to;
+  }
+  char label[48];
+  if (!ok)
+    std::snprintf(label, sizeof(label), "DISC CHANGE FAILED");
+  else if (number > 0 && count > 1)
+    std::snprintf(label, sizeof(label), "DISC %d OF %d", number, count);
+  else
+    std::snprintf(label, sizeof(label), "DISC CHANGED");
+  OrbisOSDLabel(label);
+  printf("[disc] %s: %s (%s)\n", req == 6 ? "change disc combo" : "settings page", to.c_str(), ok ? label : "failed");
+  orbis_eventf("change disc: %s%s", to.substr(to.rfind('/') + 1).c_str(), ok ? "" : " (failed)");
+  fflush(stdout);
+}
+
+// At the game's start: the set, and the disc it starts from (the cheat disc, when it's on and found).
+static std::string orbis_disc_boot(const std::string& game)
+{
+  std::vector<std::string> set = fe::DiscSet(game);
+  std::string start = game;
+  MemorySettingsInterface peek;
+  orbis_apply_ini_file(peek, "/data/PCSX2/gs.ini", "gs.ini", true);
+  if (!s_game_ini_path.empty())
+    orbis_apply_ini_file(peek, s_game_ini_path.c_str(), "game ini", true);
+  std::string on, want;
+  if (peek.GetStringValue("PS5SX2", "CheatDiscStart", &on) && (on == "true" || on == "1"))
+  {
+    MemorySettingsInterface global;
+    orbis_apply_ini_file(global, "/data/PCSX2/gs.ini", "gs.ini", true);
+    if (!global.GetStringValue("PS5SX2", "CheatDisc", &want) || want.empty())
+      printf("[disc] Start from the cheat disc is on, but no cheat disc is set (Cheat disc, the sheet for all games)\n");
+    else
+    {
+      const std::string cheat = orbis_find_image(want, "the cheat disc");
+      if (!cheat.empty() && cheat != game)
+      {
+        set.erase(std::remove(set.begin(), set.end(), cheat), set.end());
+        set.insert(set.begin(), cheat);
+        start = cheat;
+      }
+    }
+  }
+  {
+    std::lock_guard<std::mutex> lock(s_disc_mutex);
+    s_disc_set = set;
+    s_disc_current = start;
+  }
+  std::string list;
+  for (size_t i = 0; i < set.size(); i++)
+    list += (i ? " | " : "") + set[i].substr(set[i].rfind('/') + 1);
+  printf("[disc] %zu disc(s): %s; starts from %s\n", set.size(), list.c_str(), start.substr(start.rfind('/') + 1).c_str());
+  fflush(stdout);
+  return start;
 }
 
 // vk-285-45: the flags folder before and after the jailbreak. Before it, the sandbox answers
@@ -3032,6 +3172,13 @@ int main()
 
   VMBootParameters params;
   params.filename = s_game_path; // vk-285-30
+  // vk-285-139: a game's discs (and the cheat disc as disc 1 when the game starts from it).
+  if (!s_game_path.empty() && !(s_game_path.size() > 4 && strcasecmp(s_game_path.c_str() + s_game_path.size() - 4, ".elf") == 0))
+  {
+    params.filename = orbis_disc_boot(s_game_path);
+    if (params.filename != s_game_path)
+      params.source_type = CDVD_SourceType::Iso;
+  }
   // 2026-10-08 (AI-assisted; testers: "mount ELFs", "ELF properties: disc path"): an .elf from the shelf boots as PCSX2 boots
   // an ELF (VMBootParameters::elf_override, always fast booted; host: is its folder when EmuCore/HostFs is on), with the disc
   // image its settings file names (PS5SX2/ElfDisc: a file name the shelf lists, or a full path), else with no disc. Needs
@@ -3044,6 +3191,9 @@ int main()
     {
       params.filename = disc;
       params.source_type = CDVD_SourceType::Iso;
+      std::lock_guard<std::mutex> lock(s_disc_mutex); // vk-285-139: the page can change it
+      s_disc_set = {disc};
+      s_disc_current = disc;
     }
     else
     {

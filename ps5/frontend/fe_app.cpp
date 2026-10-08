@@ -1062,7 +1062,7 @@ void App::OpenSheet(bool global)
 	m_sheet.SetFolderRows(!m_cfg.folder_places.empty());                // vk-285-135
 	m_picker.open = false;
 	OptionsPaths paths = m_cfg.options;
-	if (g && IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images
+	if (!g || IsElfName(g->file.c_str())) // 2026-10-08: an ELF's Disc image row lists the shelf's disc images; vk-285-139: the Cheat disc row
 	{
 		for (const GameInfo& other : m_games)
 			if (!IsElfName(other.file.c_str()))
@@ -1890,6 +1890,8 @@ void App::BuildSheet(std::vector<UiVertex>& ui, float W, float H, float k, uint3
 	{
 		BuildPicker(ui, x, sw, y, sh, k, accent);
 		FadeRange(ui, begin, ui.size(), Clamp(e * 1.4f, 0.0f, 1.0f));
+		if (m_picker.osk) // vk-285-139: the panel's keyboard for a share's address, over the shelf
+			BuildPickerKeyboard(ui, W, H, k, accent);
 		return;
 	}
 
@@ -2200,6 +2202,49 @@ void App::PickerList(const std::string& dir, const std::string& focus)
 	p.scroll = p.scroll_target = 0;
 }
 
+// vk-285-139: what a keyboard (the PS5's or the panel's) gave for a share's address: r > 0 typed, else cancelled.
+void App::FinishShareText(int r, std::string text)
+{
+	FolderPicker& p = m_picker;
+	auto status = [&](const std::string& t) {
+		m_sheet_status = t;
+		m_sheet_status_time = m_time;
+	};
+	while (!text.empty() && (text.back() == ' ' || text.back() == ';'))
+		text.pop_back();
+	while (!text.empty() && text.front() == ' ')
+		text.erase(0, 1);
+	// vk-285-138 (AI-assisted; swordpdf: "i cant edit my nfs path"): Cross on a listed share opens the keyboard with it, and
+	// what comes back takes its place.
+	const std::string editing = p.editing;
+	p.editing.clear();
+	if (r > 0 && text.size() > 6 && StartsWithNoCase(text, "nfs://") && text.find(';') == std::string::npos)
+	{
+		std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(kNfsSharesKey));
+		const auto old = std::find(list.begin(), list.end(), editing);
+		if (!editing.empty() && old != list.end())
+		{
+			*old = text;
+			list.erase(std::unique(list.begin(), list.end()), list.end());
+		}
+		else if (std::find(list.begin(), list.end(), text) == list.end())
+			list.push_back(text);
+		const bool changed = text != editing;
+		if (changed && m_sheet.SetOwn(kNfsSharesKey, JoinFolderList(list), (editing.empty() ? "NFS share added: " : "NFS share changed: ") + text))
+			status((editing.empty() ? "Added " : "Changed to ") + text + ": restart PS5SX2 to mount it");
+		else if (!changed)
+			status("Unchanged");
+		PickerList("", text);
+		Sound(Sfx::Move, 0.3f);
+	}
+	else
+	{
+		status(r > 0 && !text.empty() && text != "nfs://" ? std::string("Not an nfs:// address: ") + (editing.empty() ? "nothing added" : "the share stays as it was")
+		                                                   : std::string(editing.empty() ? "Nothing added" : "Unchanged"));
+		Sound(Sfx::Edge, 0.3f);
+	}
+}
+
 void App::UpdatePicker(double dt, const Input& in)
 {
 	FolderPicker& p = m_picker;
@@ -2219,42 +2264,78 @@ void App::UpdatePicker(double dt, const Input& in)
 		if (r == 0)
 			return;
 		p.typing = false;
-		while (!text.empty() && (text.back() == ' ' || text.back() == ';'))
-			text.pop_back();
-		while (!text.empty() && text.front() == ' ')
-			text.erase(0, 1);
-		// vk-285-138 (AI-assisted; swordpdf: "i cant edit my nfs path"): Cross on a listed share opens the keyboard with it, and
-		// what comes back takes its place.
-		const std::string editing = p.editing;
-		p.editing.clear();
-		if (r > 0 && text.size() > 6 && StartsWithNoCase(text, "nfs://") && text.find(';') == std::string::npos)
+		FinishShareText(r, text);
+		return;
+	}
+	// vk-285-139: the panel's own keyboard: D-pad to a key, Cross types it, Square deletes, Options done, Circle cancels.
+	if (p.osk)
+	{
+		using Panel = AchievementAccountPanel;
+		const bool up = pressed(in.up, m_prev.up), down = pressed(in.down, m_prev.down), left = pressed(in.left, m_prev.left),
+				   right = pressed(in.right, m_prev.right);
+		if (up || down)
 		{
-			std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(kNfsSharesKey));
-			const auto old = std::find(list.begin(), list.end(), editing);
-			if (!editing.empty() && old != list.end())
+			const int to = std::clamp(p.osk_row + (down ? 1 : -1), 0, Panel::FnRow);
+			if (to != p.osk_row)
 			{
-				*old = text;
-				list.erase(std::unique(list.begin(), list.end()), list.end());
+				const float x = Panel::KeyCentre(p.osk_page, p.osk_row, p.osk_col);
+				int best = 0;
+				for (int c = 1; c < Panel::RowKeys(p.osk_page, to); c++)
+					if (std::abs(Panel::KeyCentre(p.osk_page, to, c) - x) < std::abs(Panel::KeyCentre(p.osk_page, to, best) - x))
+						best = c;
+				p.osk_row = to;
+				p.osk_col = best;
+				Sound(Sfx::Move, 0.3f);
 			}
-			else if (std::find(list.begin(), list.end(), text) == list.end())
-				list.push_back(text);
-			const bool changed = text != editing;
-			if (changed && m_sheet.SetOwn(kNfsSharesKey, JoinFolderList(list), (editing.empty() ? "NFS share added: " : "NFS share changed: ") + text))
-				status((editing.empty() ? "Added " : "Changed to ") + text + ": restart PS5SX2 to mount it");
-			else if (!changed)
-				status("Unchanged");
-			PickerList("", text);
-			Sound(Sfx::Move, 0.3f);
 		}
-		else
+		if (left || right)
 		{
-			status(r > 0 && !text.empty() && text != "nfs://" ? std::string("Not an nfs:// address: ") + (editing.empty() ? "nothing added" : "the share stays as it was")
-			                                                   : std::string(editing.empty() ? "Nothing added" : "Unchanged"));
-			Sound(Sfx::Edge, 0.3f);
+			const int to = std::clamp(p.osk_col + (right ? 1 : -1), 0, Panel::RowKeys(p.osk_page, p.osk_row) - 1);
+			Sound(to != p.osk_col ? Sfx::Move : Sfx::Edge, 0.3f);
+			p.osk_col = to;
+		}
+		auto erase = [&] {
+			if (!p.osk_text.empty())
+				p.osk_text.pop_back();
+		};
+		if (pressed(in.square, m_prev.square))
+			erase();
+		if (pressed(in.circle, m_prev.circle))
+		{
+			p.osk = false;
+			FinishShareText(-1, {});
+			return;
+		}
+		bool done = pressed(in.options, m_prev.options);
+		if (pressed(in.cross, m_prev.cross))
+		{
+			Sound(Sfx::Move, 0.3f);
+			if (p.osk_row < Panel::FnRow)
+			{
+				if (p.osk_text.size() < 255)
+					p.osk_text += Panel::PageRows[p.osk_page][p.osk_row][p.osk_col];
+			}
+			else
+				switch (p.osk_col)
+				{
+					case Panel::FnShift: p.osk_page = p.osk_page == 0 ? 1 : 0; break;
+					case Panel::FnSymbols: p.osk_page = p.osk_page == 2 ? 0 : 2; break;
+					case Panel::FnSpace:
+						if (p.osk_text.size() < 255)
+							p.osk_text += ' ';
+						break;
+					case Panel::FnDelete: erase(); break;
+					case Panel::FnDone: done = true; break;
+				}
+			p.osk_col = std::min(p.osk_col, Panel::RowKeys(p.osk_page, p.osk_row) - 1);
+		}
+		if (done)
+		{
+			p.osk = false;
+			FinishShareText(1, p.osk_text);
 		}
 		return;
 	}
-
 	// Circle: up a folder, from a place's top back to the places, from the places back to the sheet.
 	if (pressed(in.circle, m_prev.circle) || pressed(in.options, m_prev.options))
 	{
@@ -2346,8 +2427,13 @@ void App::UpdatePicker(double dt, const Input& in)
 					p.typing = true;
 				else
 				{
-					status("The keyboard didn't open: add shares on the settings page (Folders)");
-					Sound(Sfx::Edge, 0.3f);
+					// vk-285-139: the panel's own keyboard instead (swordpdf's 138: "the keyboard didnt open").
+					p.osk = true;
+					p.osk_text = item.type == T::Share ? item.path : item.value;
+					p.osk_page = 0;
+					p.osk_row = 1;
+					p.osk_col = 0;
+					Sound(Sfx::Move, 0.3f);
 				}
 				break;
 			case T::Listed:
@@ -2439,7 +2525,10 @@ void App::BuildPicker(std::vector<UiVertex>& ui, float x, float sw, float y, flo
 	Fonts::AddRoundedRect(ui, cx, list_bottom + 44 * k, inner, 2 * k, 0, Rgba(1, 1, 1, 0.12f));
 	std::string help;
 	const PickerItem* it = p.items.empty() ? nullptr : &p.items[static_cast<size_t>(p.row)];
-	if (p.typing)
+	if (p.osk)
+		help = "Type the share's address, nfs://<server>/<shared folder>: Cross types the key, Square deletes, Options is done, Circle "
+		       "cancels. Add ?version=4 for an NFS v4 server.";
+	else if (p.typing)
 		help = "Type the share's address on the PS5's keyboard: nfs://<server>/<shared folder>, as the server shares it (a folder "
 		       "inside it works too). Add ?version=4 for an NFS v4 server.";
 	else if (it && it->type == T::Use)
@@ -2703,6 +2792,39 @@ void App::BuildAccount(std::vector<UiVertex>& ui, float W, float H, float k, uin
 void App::BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, float w, float k)
 {
 	using Panel = AchievementAccountPanel;
+	const bool password = m_account.row == Panel::RowPassword;
+	BuildPanelKeyboard(ui, x, y, w, k, Tr(password ? Str::AccountPassword : Str::AccountUsername), m_account.page, m_account.key_row,
+		m_account.key_col);
+}
+
+// vk-285-139: the share's address as typed, over the panel's keyboard, at the bottom of the screen.
+void App::BuildPickerKeyboard(std::vector<UiVertex>& ui, float W, float H, float k, uint32_t accent)
+{
+	using Panel = AchievementAccountPanel;
+	const FolderPicker& p = m_picker;
+	const float key_w = 152 * k, gap = 16 * k, pad = 48 * k, key_h = 108 * k;
+	const float w = Panel::Columns * key_w + (Panel::Columns - 1) * gap + 2 * pad;
+	const float h = 5 * key_h + 4 * gap + 2 * pad + 64 * k;
+	const float x = (W - w) * 0.5f, ky = H - h - 150 * k;
+	// The field: what's typed so far (its end, when it's long) and a caret.
+	const float fy = ky - 170 * k, fh = 130 * k;
+	Fonts::AddRoundedRect(ui, x - 2 * k, fy - 2 * k, w + 4 * k, fh + 4 * k, 34 * k, Rgba(1, 1, 1, 0.16f));
+	Fonts::AddRoundedRect(ui, x, fy, w, fh, 32 * k, Rgba(0.045f, 0.050f, 0.105f, 0.985f));
+	Fonts::AddRoundedRect(ui, x + 28 * k, fy + 30 * k, 6 * k, fh - 60 * k, 3 * k, accent);
+	std::string shown = p.osk_text;
+	const float px = 44 * k, room = w - 120 * k;
+	while (shown.size() > 1 && m_fonts->Measure(shown.c_str(), px) > room)
+		shown.erase(0, 1);
+	const bool caret = std::fmod(m_time, 1.0) < 0.6;
+	m_fonts->AddText(ui, (shown + (caret ? "|" : " ")).c_str(), x + 60 * k, fy + fh * 0.5f + px * 0.36f, px, Rgba(1, 1, 1), 0.3f);
+	BuildPanelKeyboard(ui, x, ky, w, k, "NFS share", p.osk_page,
+		p.osk_row, p.osk_col);
+}
+
+void App::BuildPanelKeyboard(std::vector<UiVertex>& ui, float x, float y, float w, float k, const std::string& field_title, int page,
+	int key_row, int key_col)
+{
+	using Panel = AchievementAccountPanel;
 	const uint32_t hi = Rgba(1, 1, 1), lo = Rgba(0.52f, 0.50f, 0.64f);
 	const uint32_t ink = Rgba(0.07f, 0.06f, 0.16f);
 	const float key_w = 152 * k, key_h = 108 * k, gap = 16 * k, pad = 48 * k;
@@ -2713,14 +2835,13 @@ void App::BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, floa
 	Fonts::AddRoundedRect(ui, x, y, w, h, 42 * k, Rgba(0.045f, 0.050f, 0.105f, 0.985f));
 
 	// The field being typed into, and the page.
-	const bool password = m_account.row == Panel::RowPassword;
-	std::string title = Tr(password ? Str::AccountPassword : Str::AccountUsername);
+	std::string title = field_title;
 	for (char& c : title)
 		c = static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
 	const float gx = x + (w - grid_w) * 0.5f;
 	m_fonts->AddText(ui, title.c_str(), gx, y + pad + 26 * k, 26 * k, lo, 0.45f);
 	static const char* const kPageNames[Panel::Pages] = {"abc", "ABC", "#+="};
-	m_fonts->AddText(ui, kPageNames[m_account.page], gx + grid_w, y + pad + 26 * k, 26 * k, lo, 0.45f, Fonts::Right);
+	m_fonts->AddText(ui, kPageNames[page], gx + grid_w, y + pad + 26 * k, 26 * k, lo, 0.45f, Fonts::Right);
 
 	const float top = y + pad + 64 * k;
 	auto key = [&](float kx, float ky, float kw, const char* label, bool focused, bool function) {
@@ -2732,16 +2853,16 @@ void App::BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, floa
 	};
 	for (int r = 0; r < Panel::CharRows; r++)
 	{
-		const int n = Panel::RowKeys(m_account.page, r);
+		const int n = Panel::RowKeys(page, r);
 		const float row_x = gx + (Panel::Columns - n) * 0.5f * (key_w + gap);
 		for (int c = 0; c < n; c++)
 		{
-			const char text[2] = {Panel::PageRows[m_account.page][r][c], '\0'};
-			key(row_x + c * (key_w + gap), top + r * (key_h + gap), key_w, text, m_account.key_row == r && m_account.key_col == c,
+			const char text[2] = {Panel::PageRows[page][r][c], '\0'};
+			key(row_x + c * (key_w + gap), top + r * (key_h + gap), key_w, text, key_row == r && key_col == c,
 				false);
 		}
 	}
-	const char* const fn_labels[Panel::FnCount] = {m_account.page == 0 ? "ABC" : "abc", m_account.page == 2 ? "abc" : "#+=",
+	const char* const fn_labels[Panel::FnCount] = {page == 0 ? "ABC" : "abc", page == 2 ? "abc" : "#+=",
 		Tr(Str::KeySpace), Tr(Str::HintDelete), Tr(Str::HintDone)};
 	float fx = gx;
 	const float fy = top + Panel::CharRows * (key_h + gap);
@@ -2749,7 +2870,7 @@ void App::BuildAccountKeyboard(std::vector<UiVertex>& ui, float x, float y, floa
 	{
 		// A function key spans its width in keys, with the gaps between them.
 		const float fw = Panel::FnWidth[c] * (key_w + gap) - gap;
-		key(fx, fy, fw, fn_labels[c], m_account.key_row == Panel::FnRow && m_account.key_col == c, true);
+		key(fx, fy, fw, fn_labels[c], key_row == Panel::FnRow && key_col == c, true);
 		fx += fw + gap;
 	}
 }

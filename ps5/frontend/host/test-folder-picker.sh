@@ -75,6 +75,20 @@ check "an smb:// edit leaves the share" test "$(ini PS5SX2/NfsShares)" = "nfs://
 steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press down;press triangle;wait 0.3;press circle;wait 0.3;expect picker=0" > "$script"
 run nfs-share-removed --script "$script"
 check "the share is gone from gs.ini" test -z "$(ini PS5SX2/NfsShares)"
+# vk-285-139: no PS5 keyboard (no --ime): the panel's own keyboard. Up to "1", Cross three times, Options: "nfs://111".
+steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press cross;wait 0.3;press up;press cross 3;wait 0.2;shot picker-osk;press options;wait 0.3;expect picker=1" > "$script"
+run nfs-share-osk --script "$script"
+check "the panel's keyboard typed the share" test "$(ini PS5SX2/NfsShares)" = "nfs://111"
+# Changing it there: Square deletes a character, Options keeps it.
+steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press down;press cross;wait 0.3;press square;press options;wait 0.3" > "$script"
+run nfs-share-osk-edit --script "$script"
+check "the panel's keyboard changed the share" test "$(ini PS5SX2/NfsShares)" = "nfs://11"
+# Circle cancels: it stays.
+steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press down;press cross;wait 0.3;press square;press circle;wait 0.3;expect picker=1" > "$script"
+run nfs-share-osk-cancel --script "$script"
+check "Circle leaves the share" test "$(ini PS5SX2/NfsShares)" = "nfs://11"
+steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press down;press triangle;wait 0.3" > "$script"
+run nfs-share-osk-removed --script "$script"
 # Not an nfs:// address: nothing added.
 steps "$open_all;press down 3;wait 0.2;press cross;wait 0.3;press cross;wait 0.4" > "$script"
 run nfs-share-refused --ime-text "smb://pc/games" --script "$script"

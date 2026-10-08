@@ -678,6 +678,10 @@ void WebServer::Route(const Request& req, Response& res)
 		ApiSave(req, res);
 	else if (req.path == "/api/report" && (req.method == "GET" || req.method == "HEAD"))
 		ApiReport(req, res);
+	else if (req.path == "/api/discs" && req.method == "GET") // vk-285-139
+		ApiDiscs(res);
+	else if (req.path == "/api/disc" && req.method == "POST")
+		ApiDisc(req, res);
 	else if (req.path == "/api/note" && req.method == "POST")
 		ApiNote(req, res);
 	else if (req.path == "/api/memcards" && req.method == "GET")
@@ -1324,6 +1328,54 @@ void WebServer::ApiReport(const Request& req, Response& res)
 
 // Test build 1 (vk-285-55): a tester's own words about what happened, on one line of the settings
 // log, beside the app's own lines from the same moment.
+// vk-285-139 (AI-assisted; swordpdf: "multi-disc and disc-change support (to even support gameshark iso)"): while a game runs,
+// the page's Disc row lists the game's discs, then every image on the shelf, and puts the one picked in.
+void WebServer::ApiDiscs(Response& res)
+{
+	const std::string current = m_cfg.current_disc ? m_cfg.current_disc() : std::string();
+	const std::vector<std::string> set = m_cfg.disc_set ? m_cfg.disc_set() : std::vector<std::string>();
+	auto name_of = [](const std::string& p) { return p.substr(p.rfind('/') + 1); };
+	std::string out = "{\"current\":" + Json(current) + ",\"set\":[";
+	for (size_t i = 0; i < set.size(); i++)
+		out += std::string(i ? "," : "") + "{\"path\":" + Json(set[i]) + ",\"name\":" + Json(name_of(set[i])) + "}";
+	out += "],\"games\":[";
+	bool first = true;
+	for (const GameInfo& g : Games())
+	{
+		if (IsElfName(g.file.c_str()))
+			continue;
+		out += std::string(first ? "" : ",") + "{\"path\":" + Json(g.path) + ",\"title\":" + Json(g.title) + "}";
+		first = false;
+	}
+	res.body = out + "]}";
+}
+
+void WebServer::ApiDisc(const Request& req, Response& res)
+{
+	const std::string path = Trim(req.body);
+	bool known = false;
+	if (m_cfg.disc_set)
+		for (const std::string& p : m_cfg.disc_set())
+			known = known || p == path;
+	for (const GameInfo& g : Games())
+		known = known || (g.path == path && !IsElfName(g.file.c_str()));
+	if (path.empty() || !known)
+	{
+		res.status = 400;
+		res.body = Error("not one of the console's disc images");
+		return;
+	}
+	if (!m_cfg.change_disc || !m_cfg.change_disc(path))
+	{
+		res.status = 409;
+		res.body = Error("no game is running");
+		return;
+	}
+	if (!m_cfg.change_log.empty())
+		AppendSettingsLog(m_cfg.change_log, "page: change disc to " + path);
+	res.body = "{\"ok\":true}";
+}
+
 void WebServer::ApiNote(const Request& req, Response& res)
 {
 	std::string text;

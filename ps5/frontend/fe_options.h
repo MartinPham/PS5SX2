@@ -72,6 +72,7 @@ struct OptionsPaths
 
 // 2026-10-08: an ELF's disc image, by its file name as the shelf lists it (main-boot.cpp finds it in the game folders).
 constexpr const char* kElfDiscKey = "PS5SX2/ElfDisc";
+constexpr const char* kCheatDiscKey = "PS5SX2/CheatDisc"; // vk-285-139: gs.ini, a disc image the shelf lists
 
 // vk-285-135 (AI-assisted; Spyros: "i also want to pick a folder though the browser in the shelf"): the folders main-boot.cpp
 // reads when PS5SX2 starts, in gs.ini, set from the sheet for all games (the app's folder picker) as from the settings page.
@@ -102,6 +103,7 @@ public:
 		GameFolders, // vk-285-135: the sheet for all games: more game folders (the app's folder picker)
 		BiosFolder,  // vk-285-135: where the BIOS is looked for first (the folder picker)
 		NfsShares,   // vk-285-135: NFS shares' addresses (the app's list, the PS5's keyboard)
+		CheatDisc,   // vk-285-139: the sheet for all games: the cheat disc (kCheatDiscKey, one of the shelf's images)
 	};
 
 	enum class From
