@@ -158,19 +158,33 @@ uint32_t ElfCrc(const std::vector<uint8_t>& elf)
 
 bool LooksLikePnach(const std::string& text)
 {
+	return ClassifyPnach(text) == PnachKind::Patches;
+}
+
+PnachKind ClassifyPnach(const std::string& text)
+{
 	if (text.empty() || text.size() > (1u << 20) || text.find('\0') != std::string::npos)
-		return false;
+		return PnachKind::NotPnach;
+	bool pnach = false;
 	size_t at = 0;
 	while (at < text.size())
 	{
 		size_t nl = text.find('\n', at);
 		if (nl == std::string::npos)
 			nl = text.size();
-		if (IsPatchLine(text.substr(at, nl - at)))
-			return true;
+		const std::string line = text.substr(at, nl - at);
 		at = nl + 1;
+		if (IsPatchLine(line))
+			return PnachKind::Patches;
+		// What a pnach has besides patches: its title, a group, or a patch line commented out ("//patch=1,EE,...").
+		std::string t = Trimmed(line);
+		while (t.size() >= 2 && t[0] == '/' && t[1] == '/')
+			t = Trimmed(t.substr(2));
+		if (StartsWithNoCase(t, "gametitle=") || StartsWithNoCase(t, "patch=") || StartsWithNoCase(t, "dpatch=") ||
+			IsGroupHeader(PnachTrim(t)))
+			pnach = true;
 	}
-	return false;
+	return pnach ? PnachKind::Empty : PnachKind::NotPnach;
 }
 
 std::string TagPnachGroups(const std::string& text, const std::string& tag, const std::string& unnamed)
@@ -395,7 +409,7 @@ OnlinePatchStatus OnlinePatches::FetchWithCrc(const std::string& serial, uint32_
 	char key[48];
 	std::snprintf(key, sizeof(key), "%s_%08X", serial.c_str(), crc);
 	Log(std::string(key) + ": looking online");
-	int found_patches = 0, found_cheats = 0, fetched = 0, kept = 0, failed = 0, missing = 0;
+	int found_patches = 0, found_cheats = 0, fetched = 0, kept = 0, failed = 0, missing = 0, empty = 0;
 	std::string why;
 	for (const OnlinePatchSource& src : OnlinePatchSources())
 	{
@@ -407,6 +421,15 @@ OnlinePatchStatus OnlinePatches::FetchWithCrc(const std::string& serial, uint32_
 		{
 			missing++;
 			Log(std::string(key) + ": " + src.name + ": none (404)");
+			continue;
+		}
+		if (status == 200 && ClassifyPnach(body) == PnachKind::Empty)
+		{
+			// vk-285-135: a file with nothing to apply (every line commented out) is no patch for this game: like a 404.
+			missing++;
+			empty++;
+			Log(std::string(key) + ": " + src.name + ": its file has no patch turned on (" + std::to_string(body.size()) +
+				" bytes, every patch line commented out): nothing to fetch");
 			continue;
 		}
 		if (status != 200 || !LooksLikePnach(body))
@@ -474,7 +497,8 @@ OnlinePatchStatus OnlinePatches::FetchWithCrc(const std::string& serial, uint32_
 		return {OnlinePatchStatus::State::Failed, why};
 	(void)fetched;
 	(void)missing;
-	return {OnlinePatchStatus::State::Done, "Nothing online for this game"};
+	// vk-285-135: say so when a source does have a file, with nothing turned on in it (Ratchet & Clank in PCSX2's list).
+	return {OnlinePatchStatus::State::Done, empty ? "Nothing online for this game (its patches there are turned off)" : "Nothing online for this game"};
 }
 
 OnlinePatchService OnlinePatches::Service()

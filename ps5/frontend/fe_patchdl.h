@@ -81,6 +81,16 @@ std::string OnlinePatchUrl(const OnlinePatchSource& src, const std::string& key)
 uint32_t ElfCrc(const std::vector<uint8_t>& elf);
 // A pnach file's text: no NUL bytes, under 1 MB, and at least one patch= line (an HTML error page isn't one).
 bool LooksLikePnach(const std::string& text);
+// vk-285-135: what an answer is. PCSX2's file for Ratchet & Clank (SCUS-97199_CE4933D0) has every line commented out
+// ("//patch=", its widescreen patch breaks textures): a pnach with nothing to apply (Empty), which the sheet now reports
+// as nothing online for the game, not as a file that "isn't a patch file" (NotPnach: no pnach lines at all).
+enum class PnachKind
+{
+	Patches, // at least one patch line PCSX2 applies
+	Empty,   // pnach text (gametitle=, a group, a commented-out patch line), but nothing to apply
+	NotPnach,
+};
+PnachKind ClassifyPnach(const std::string& text);
 // The "[name]" groups renamed "[name (tag)]", and patch lines before the first group put under "[unnamed]".
 std::string TagPnachGroups(const std::string& text, const std::string& tag, const std::string& unnamed);
 // How many groups ("[...]" lines) a pnach text has, and whether it has patch lines outside any group.

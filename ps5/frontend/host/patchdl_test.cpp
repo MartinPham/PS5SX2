@@ -82,6 +82,14 @@ int main(int argc, char** argv)
 	Check(fe::LooksLikePnach("gametitle=X\n[60 FPS]\npatch=1,EE,00100000,word,00000000\n"), "a pnach text is one");
 	Check(!fe::LooksLikePnach("<!DOCTYPE html><html>404</html>"), "an HTML page is not");
 	Check(!fe::LooksLikePnach(""), "nothing is not");
+	// vk-285-135: PCSX2's Ratchet & Clank file (SCUS-97199_CE4933D0) has every line commented out: a pnach with nothing in it.
+	{
+		const std::string rc = "//gametitle=Ratchet & Clank (NTSC-U)\n\n//[Widescreen 16:9]\n//gsaspectratio=16:9\n"
+		                       "// DWORD Code patching routine\n//patch=1,EE,200C0000,extended,3C1B000C\n";
+		Check(fe::ClassifyPnach(rc) == fe::PnachKind::Empty, "a pnach with every line commented out has nothing in it");
+		Check(fe::ClassifyPnach("gametitle=X\n[60 FPS]\npatch=1,EE,1,word,2\n") == fe::PnachKind::Patches, "one with a patch line has patches");
+		Check(fe::ClassifyPnach("<!DOCTYPE html><html>\n<body>Not Found</body></html>\n") == fe::PnachKind::NotPnach, "an HTML page isn't one");
+	}
 	{
 		const std::string in = "gametitle=Game\n// comment\npatch=1,EE,1,word,2\n[60 FPS]\nauthor=me\npatch=1,EE,3,word,4\n[]\npatch=1,EE,5,word,6\n";
 		const std::string out = fe::TagPnachGroups(in, "Gabominated", "Gabominated");
@@ -169,6 +177,16 @@ int main(int argc, char** argv)
 		const fe::OnlinePatchStatus s = op.FetchWithCrc("SLES-11111", 0x11111111);
 		Check(s.state == fe::OnlinePatchStatus::State::Failed && !Exists(patches + "/SLES-11111_11111111.pnach"),
 			"an HTML answer fails and writes nothing: " + s.message);
+	}
+	// vk-285-135: a file with every patch commented out (PCSX2's Ratchet & Clank): nothing online, no failure, no file.
+	server["https://raw.githubusercontent.com/PCSX2/pcsx2_patches/main/patches/SCUS-97199_CE4933D0.pnach"] = {200,
+		"//gametitle=Ratchet & Clank (NTSC-U)\n\n//[Widescreen 16:9]\n//gsaspectratio=16:9\n//patch=1,EE,200C0000,extended,3C1B000C\n"};
+	{
+		fe::OnlinePatches op(platform, patches, cheats, manifest);
+		const fe::OnlinePatchStatus s = op.FetchWithCrc("SCUS-97199", 0xCE4933D0);
+		Check(s.state == fe::OnlinePatchStatus::State::Done && s.message.find("Nothing online for this game") == 0 &&
+				  s.message.find("turned off") != std::string::npos && !Exists(patches + "/SCUS-97199_CE4933D0.pnach"),
+			"a file with its patches commented out is nothing online, not a failure: " + s.message);
 	}
 
 	// The sheet: the game's Cheats rows, on and off, and EmuCore/EnableCheats with them.
