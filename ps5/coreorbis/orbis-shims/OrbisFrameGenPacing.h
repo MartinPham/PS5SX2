@@ -23,6 +23,12 @@
 // 160 s; back to 10 s after 5 minutes without one). If it is as slow without them, the game is slow by itself there: frames
 // are generated again, and for a minute that speed (less 3 points) is the floor. Nothing is generated while the frame
 // limiter isn't at normal speed (turbo, slow motion, the fast boot). Header-only, so a PC test runs it (tests/fgpacing).
+//
+// vk-285-135: and only while the game's frame rate is steady: 7 of the last 8 intervals the same length to start, 6 to go on.
+// Spyros on vk-285-134d, Ratchet & Clank where its frames take 1 or 2 vsyncs (45-58 fps): "it felt like actually worse
+// than 50". One generated frame before each of the game's on frames of uneven length makes the motion speed up and slow
+// down from refresh to refresh, on top of the in-between frames' artifacts and the frame of lag; an even rate (60 to 120,
+// 30 to 60) is what it doubles well. Uneven stretches show the game's own frames.
 
 #pragma once
 
@@ -43,6 +49,7 @@ namespace orbis_fg
 	{
 		Warming,    // the start, or a load or a pause: 8 frames first
 		NoRoom,     // the game's frames have fewer than two refreshes each
+		Unsteady,   // vk-285-135: the game's frames aren't of one length (fewer than 7 of the last 8, or 6 once generating)
 		NotNominal, // the frame limiter isn't at normal speed
 		Paused,     // the safety net's pause
 		Generating,
@@ -73,6 +80,8 @@ namespace orbis_fg
 		static constexpr double kSettle = 2.0;         // a pause's first seconds aren't the game's speed without them yet
 		static constexpr double kFloorSeconds = 60.0;
 		static constexpr double kCostly = 3.0;         // points of speed a pause has to win back to blame the generated frames
+		static constexpr uint32_t kSteadyStart = 7;    // vk-285-135: intervals of the window's usual length, to start generating...
+		static constexpr uint32_t kSteadyKeep = 6;     // ...and to go on
 
 		// One new frame of the game: `vsyncs` since the last new frame (1 at 60 fps, 2 at 30), `already` the presents made since
 		// the last one was given here (its own game frame and any repeat presented after it), the PS2's and the display's rates
@@ -103,6 +112,7 @@ namespace orbis_fg
 				m_count = m_count < kWindow ? m_count + 1 : kWindow;
 			}
 			m_median = Median();
+			m_steady = UsualCount();
 			m_refreshes = m_median * ratio;
 			const double now_refreshes = vsyncs * ratio;
 
@@ -117,7 +127,11 @@ namespace orbis_fg
 
 			const bool warm = m_count >= kWindow;
 			m_room = warm && m_refreshes >= (m_room ? kDisengage : kEngage);
-			m_state = !warm ? State::Warming : !m_room ? State::NoRoom : !nominal ? State::NotNominal : Paused() ? State::Paused : State::Generating;
+			// vk-285-135: steady enough, with the same hysteresis (the state just before says which threshold).
+			const bool was_generating = m_state == State::Generating || m_state == State::Paused || m_state == State::NotNominal;
+			const bool steady = warm && m_steady >= (was_generating ? kSteadyKeep : kSteadyStart);
+			m_state = !warm ? State::Warming : !m_room ? State::NoRoom : !steady ? State::Unsteady : !nominal ? State::NotNominal :
+			          Paused() ? State::Paused : State::Generating;
 			d.engaged = m_state == State::Generating;
 			if (!d.engaged)
 			{
@@ -145,6 +159,7 @@ namespace orbis_fg
 
 		State GetState() const { return m_state; }
 		double MedianVsyncs() const { return m_median; }
+		uint32_t SteadyFrames() const { return m_steady; } // vk-285-135: the window's intervals of its usual length
 		double Refreshes() const { return m_refreshes; }
 		uint32_t Repeats() const { return m_repeats; }
 		uint32_t WarmFrames() const { return m_count; }
@@ -166,6 +181,20 @@ namespace orbis_fg
 				v[i] = m_window[(m_next + kWindow - 1 - i) % kWindow];
 			std::sort(v, v + m_count);
 			return (m_count & 1) ? v[m_count / 2] : (v[m_count / 2 - 1] + v[m_count / 2]) / 2.0;
+		}
+
+		// vk-285-135: how many of the window's intervals have its most common length.
+		uint32_t UsualCount() const
+		{
+			uint32_t best = 0;
+			for (uint32_t i = 0; i < m_count; i++)
+			{
+				uint32_t same = 0;
+				for (uint32_t j = 0; j < m_count; j++)
+					same += m_window[(m_next + kWindow - 1 - j) % kWindow] == m_window[(m_next + kWindow - 1 - i) % kWindow] ? 1 : 0;
+				best = std::max(best, same);
+			}
+			return best;
 		}
 
 		// Once a second: the speed against the floor while frames are generated, and the pauses.
@@ -243,6 +272,7 @@ namespace orbis_fg
 		uint32_t m_window[kWindow] = {};
 		uint32_t m_next = 0, m_count = 0;
 		double m_median = 0.0;
+		uint32_t m_steady = 0; // vk-285-135
 		double m_refreshes = 0.0;
 		uint32_t m_repeats = 1;
 		bool m_room = false;

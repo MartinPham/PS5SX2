@@ -329,6 +329,72 @@ int main()
 		CHECK(std::fabs(r.p.PauseSeconds() - 160.0) < 1e-9);
 	}
 
+	// vk-285-135: only a steady frame rate gets generated frames. Ratchet & Clank's stretch of frames 1 or 2 vsyncs long
+	// (45-58 fps) at 120 Hz: none, the game's own frames.
+	{
+		Run r;
+		const uint32_t pattern[] = {1, 1, 2, 1, 2, 1, 1, 2, 1, 2, 2, 1};
+		uint32_t generated = 0;
+		for (int i = 0; i < 600; i++)
+		{
+			const Decision d = r.Frame(pattern[i % 12], kNtsc, kHz120);
+			generated += d.presents;
+		}
+		CHECK(generated == 0);
+		CHECK(r.p.GetState() == State::Unsteady);
+		CHECK(r.p.SteadyFrames() < Pacing::kSteadyStart);
+	}
+	// A steady 60 fps game with a slow frame now and then (1 in 8): still generated, the long frame capped by its own refreshes.
+	{
+		Run r;
+		uint32_t generated = 0;
+		for (int i = 0; i < 400; i++)
+		{
+			const Decision d = r.Frame(i % 8 == 7 ? 2 : 1, kNtsc, kHz120);
+			if (i > 50)
+				generated += d.presents;
+		}
+		CHECK(generated > 300);
+		CHECK(r.p.GetState() == State::Generating);
+		CHECK(!r.over_budget);
+	}
+	// Generating, then the frames turn uneven: 2 of 8 different keeps it on, 3 of 8 stops it; 7 of 8 even again starts it.
+	{
+		Run r;
+		for (int i = 0; i < 60; i++)
+			r.Frame(1, kNtsc, kHz120);
+		CHECK(r.p.GetState() == State::Generating);
+		r.Frame(2, kNtsc, kHz120);
+		r.Frame(1, kNtsc, kHz120);
+		r.Frame(2, kNtsc, kHz120);
+		CHECK(r.p.SteadyFrames() == 6);
+		CHECK(r.p.GetState() == State::Generating);
+		r.Frame(2, kNtsc, kHz120);
+		CHECK(r.p.SteadyFrames() == 5);
+		CHECK(r.p.GetState() == State::Unsteady);
+		// Back to even: the three 2s leave the window one by one; 6 of 8 isn't enough to start again, 7 is.
+		int to_start = 0;
+		while (r.p.GetState() != State::Generating && to_start < 20)
+		{
+			const uint32_t before = r.p.SteadyFrames();
+			r.Frame(1, kNtsc, kHz120);
+			to_start++;
+			if (r.p.GetState() == State::Generating)
+				CHECK(r.p.SteadyFrames() >= Pacing::kSteadyStart && before < Pacing::kSteadyStart + 1);
+		}
+		CHECK(r.p.GetState() == State::Generating);
+		CHECK(r.p.SteadyFrames() == 7);
+	}
+	// A steady 30 fps game at 60 Hz still doubles; one alternating between 30 and 20 fps (2, 3 vsyncs) doesn't.
+	{
+		CHECK(Steady(2, kNtsc, kHz60).engaged);
+		Run r;
+		bool any = false;
+		for (int i = 0; i < 400; i++)
+			any = r.Frame(i % 2 ? 3 : 2, kNtsc, kHz60).presents > 0 || any;
+		CHECK(!any);
+	}
+
 	printf("%s: %d of %d checks passed (frame generation's pacing)\n", s_failures ? "FAIL" : "PASS", s_checks - s_failures, s_checks);
 	return s_failures ? 1 : 0;
 }

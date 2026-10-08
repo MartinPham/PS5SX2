@@ -316,7 +316,7 @@ const GROUPS = [
       options: [["6","FSR"],["7","FSR soft"],["0","Classic"],["5","CRT"]] },
     // 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp), read when the game starts.
     { key: "PS5SX2/FrameGeneration", label: "Frame generation", type: "toggle", def: "false", short: "Frame gen %", restart: true,
-      hint: "Shows a frame made between two of the game's: a 60 fps game at 120 on a TV that takes 120 Hz (the TV switches to 120 Hz for the game), a 30 fps game at 60. A little more input lag, and small smears at the edges of fast movement. Experimental. Takes effect when the game starts." },
+      hint: "Shows a frame made between two of the game's: a 60 fps game at 120 on a TV that takes 120 Hz (the TV switches to 120 Hz for the game), a 30 fps game at 60. Only while the game holds its frame rate (an uneven one shows the game's own frames); the FPS box then counts what the TV gets. A little more input lag, and small smears at the edges of fast movement. Experimental. Takes effect when the game starts." },
   ]},
   { title: "Graphics", items: [
     { key: "PS5SX2/Renderer", label: "Renderer", type: "seg", def: "Hardware", short: "%", restart: true,

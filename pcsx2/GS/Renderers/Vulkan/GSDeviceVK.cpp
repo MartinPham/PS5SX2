@@ -4515,6 +4515,11 @@ namespace
 			case orbis_fg::State::Warming:
 				printf("[fg] not generating yet: %u of %u frames since the start or a load\n", p.WarmFrames(), orbis_fg::Pacing::kWindow);
 				break;
+			case orbis_fg::State::Unsteady: // vk-285-135
+				printf("[fg] not generating: the game's frames aren't of one length (%u of the last %u alike; %u to start, %u to go on), "
+					   "so the game's own frames are shown\n",
+					p.SteadyFrames(), orbis_fg::Pacing::kWindow, orbis_fg::Pacing::kSteadyStart, orbis_fg::Pacing::kSteadyKeep);
+				break;
 			case orbis_fg::State::NotNominal:
 				printf("[fg] not generating: the frame limiter isn't at normal speed (turbo, slow motion, the fast boot) or a video "
 					   "is being captured\n");
