@@ -4,7 +4,15 @@
 //
 //   build-host.sh && ./fe_host --data <folder> --out <folder> [--size 1920x1080] [--lang <ps5 language id>] [--ime]
 //   [--no-bios "<what was found instead>"] (vk-285-134) [--ime-text "<what the keyboard types>"] (vk-285-135: with --ime)
+//   [--games <file>] [--build-tag <text>] [--record <out.mp4> [--record-fps 30|60]] (2026-10-08: the showcase video)
 //                               [--script <file>] [step ...]
+// --games: one game a line, "title|region|serial|size in MB" (the shelf's order); its cover is <data>/covers/<serial>.jpg.
+// --record: every frame the steps run (at --record-fps, default 30) goes to ffmpeg, which writes out.mp4 (H.264, near
+// lossless); "shot" steps still write their PNGs. "rec off" / "rec on" steps leave frames out (they still run).
+// --virtual-clock: the texture packs' clock is the shelf's frames and --texpacks-rate counts in it (a recorded download).
+// --places "Label=/path|...": the folder picker's places (a video shows the console's own: /data/PCSX2, /mnt/usb0).
+// --record-audio <out.wav>: the shelf's own sounds (fe_sound's key taps) for the frames recorded, 48 kHz stereo, in step
+// with --record's video; without --record nothing is drawn (a quick pass for a clip recorded before).
 //
 // <folder> for --data is a stand-in for /data/PCSX2: settings/, gs.ini, patches/, memcards/ (made when missing).
 // Steps (from --script, one a line, and/or the command line, in that order):
@@ -27,6 +35,9 @@
 #include <sys/statvfs.h>
 #include <zlib.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <chrono>
 #include <thread>
 
@@ -240,6 +251,8 @@ bool ParseStep(const std::string& line, std::vector<Step>& out)
 		s >> st.seconds;
 	else if (st.op == "shot" || st.op == "game")
 		s >> st.arg;
+	else if (st.op == "rec") // 2026-10-08: "rec on" / "rec off": what --record keeps (from the start when no step says)
+		s >> st.arg;
 	else
 	{
 		std::fprintf(stderr, "[host] unknown step: %s\n", line.c_str());
@@ -323,6 +336,16 @@ int main(int argc, char** argv)
 	std::string texpacks;      // 2026-10-05: a folder with metadata.json (archive.org's list) and pack files
 	double texpacks_rate = 0;  // KB a second for the fake downloads (0: as fast as the disk)
 	bool texpacks_fake = false; // fake downloads send zeros instead of reading the files (for the progress previews)
+	// 2026-10-08 (the showcase video): --virtual-clock: the texture packs' clock is the shelf's frames (1/60 s each), and
+	// --texpacks-rate counts in that time, so a recording shows a download at the rate given however long a frame takes to
+	// draw here. At the end the clock jumps to real time so the manager's Stop can time out.
+	bool virtual_clock = false;
+	std::atomic<double> vclock{1000.0};
+	std::atomic<bool> vclock_real{false};
+	std::atomic<int> vabort{0};
+	// A download in its request: 1 while it reads and stores bytes already due, 2 while it waits for the clock, else 0.
+	// The shelf's clock waits out the 1s: the download keeps step with it (so a run with frames left out can't outpace it).
+	std::atomic<int> vdownload{0};
 	{
 		const std::string self = argv[0];
 		const size_t slash = self.find_last_of('/');
@@ -331,6 +354,9 @@ int main(int argc, char** argv)
 	std::string web;
 	bool no_bios = false; // vk-285-134
 	std::string no_bios_problem;
+	std::string games_file, build_tag = "vk-285-114 (host)", record, record_audio; // 2026-10-08: the showcase video
+	std::string places; // 2026-10-08: --places "Label=/path|Label=/path": the folder picker's places (else the data folder's)
+	int record_fps = 30;
 	for (int i = 1; i < argc; i++)
 	{
 		const std::string a = argv[i];
@@ -362,11 +388,25 @@ int main(int argc, char** argv)
 			texpacks_rate = std::atof(next().c_str());
 		else if (a == "--texpacks-fake")
 			texpacks_fake = true;
+		else if (a == "--virtual-clock")
+			virtual_clock = true;
 		else if (a == "--no-bios") // vk-285-134: no PS2 BIOS, and what was found instead (the shelf's line, picks refused)
 		{
 			no_bios = true;
 			no_bios_problem = next();
 		}
+		else if (a == "--games")
+			games_file = next();
+		else if (a == "--build-tag")
+			build_tag = next();
+		else if (a == "--record")
+			record = next();
+		else if (a == "--places")
+			places = next();
+		else if (a == "--record-audio")
+			record_audio = next();
+		else if (a == "--record-fps")
+			record_fps = std::atoi(next().c_str()) == 60 ? 60 : 30;
 		else if (a == "--size")
 		{
 			const std::string s = next();
@@ -422,6 +462,31 @@ int main(int argc, char** argv)
 		Game("Castlevania - Lament of Innocence", "USA", "SLUS-20733", 2860),
 		Game("The Lord of the Rings - The Two Towers", "USA", "SLUS-20578", 2410),
 	};
+	if (!games_file.empty()) // 2026-10-08: the showcase's library
+	{
+		std::ifstream f(games_file);
+		std::vector<GameInfo> list;
+		for (std::string line; std::getline(f, line);)
+		{
+			if (line.empty() || line[0] == '#')
+				continue;
+			std::string field[4];
+			size_t at = 0;
+			for (int k = 0; k < 4; k++)
+			{
+				const size_t bar = line.find('|', at);
+				field[k] = line.substr(at, bar == std::string::npos ? std::string::npos : bar - at);
+				at = bar == std::string::npos ? line.size() : bar + 1;
+			}
+			list.push_back(Game(field[0].c_str(), field[1].c_str(), field[2].c_str(), std::strtoull(field[3].c_str(), nullptr, 10)));
+		}
+		if (list.empty())
+		{
+			std::fprintf(stderr, "[host] no games in %s\n", games_file.c_str());
+			return 2;
+		}
+		games = std::move(list);
+	}
 	OptionsPaths op;
 	op.settings_dir = data + "/settings";
 	op.gs_ini = data + "/gs.ini";
@@ -476,7 +541,34 @@ int main(int argc, char** argv)
             auto image = std::make_shared<std::vector<uint8_t>>();
             std::ifstream badge(data + "/badge.png", std::ios::binary);
             image->assign(std::istreambuf_iterator<char>(badge), std::istreambuf_iterator<char>());
-            for (int i = 0; i < 24; ++i) {
+            // 2026-10-08 (the showcase video): <data>/achievements.txt, "title|description|points|1 when earned|badge file", if there.
+            std::ifstream list(data + "/achievements.txt");
+            for (std::string line; std::getline(list, line);) {
+                if (line.compare(0, 6, "title=") == 0) { // the game's name over the list
+                    preview_game.title = line.substr(6);
+                    continue;
+                }
+                std::string f[5];
+                size_t at = 0;
+                for (int k = 0; k < 5; k++) {
+                    const size_t bar = line.find('|', at);
+                    f[k] = line.substr(at, bar == std::string::npos ? std::string::npos : bar - at);
+                    at = bar == std::string::npos ? line.size() : bar + 1;
+                }
+                if (f[0].empty())
+                    continue;
+                GameAchievement entry; entry.id = static_cast<uint32_t>(preview_game.entries.size() + 1);
+                entry.points = static_cast<uint32_t>(std::atoi(f[2].c_str()));
+                entry.unlocked = f[3] == "1";
+                entry.title = f[0];
+                entry.description = f[1];
+                auto own = std::make_shared<std::vector<uint8_t>>();
+                std::ifstream b(data + "/" + f[4], std::ios::binary);
+                own->assign(std::istreambuf_iterator<char>(b), std::istreambuf_iterator<char>());
+                entry.image = own->empty() ? image : own;
+                preview_game.entries.push_back(std::move(entry));
+            }
+            for (int i = 0; preview_game.entries.empty() && i < 24; ++i) {
                 GameAchievement entry; entry.id = i+1; entry.points = 5 + i*5;
                 entry.unlocked = i < 7;
                 entry.title = "Achievement " + std::to_string(i+1);
@@ -500,8 +592,9 @@ int main(int argc, char** argv)
 			body = ss.str();
 			return body.empty() ? -1 : 200;
 		};
-		tp.get_range = [texpacks, texpacks_rate, texpacks_fake](const std::string& url, uint64_t offset, uint64_t length,
-						   const std::function<bool(const void*, size_t)>& sink) {
+		tp.get_range = [texpacks, texpacks_rate, texpacks_fake, virtual_clock, &vclock, &vabort, &vdownload](const std::string& url,
+						   uint64_t offset,
+						   uint64_t length, const std::function<bool(const void*, size_t)>& sink) {
 			const std::string prefix = std::string("https://archive.org/download/") + kTexturePackItem + "/";
 			const std::string path = texpacks + "/" + PercentDecode(url.substr(prefix.size()));
 			FILE* f = texpacks_fake ? nullptr : std::fopen(path.c_str(), "rb");
@@ -510,14 +603,42 @@ int main(int argc, char** argv)
 			if (f)
 				std::fseek(f, static_cast<long>(offset), SEEK_SET);
 			std::vector<char> buf(64 * 1024, 0);
+			const double t0 = vclock.load();
+			const int generation = vabort.load();
+			uint64_t sent = 0;
+			struct Busy
+			{
+				std::atomic<int>& state;
+				~Busy() { state = 0; }
+			} busy{vdownload};
+			vdownload = virtual_clock && texpacks_rate > 0 ? 1 : 0;
 			for (uint64_t left = length; left > 0;)
 			{
 				const size_t want = static_cast<size_t>(std::min<uint64_t>(left, buf.size()));
 				const size_t n = f ? std::fread(buf.data(), 1, want, f) : want;
 				if (n == 0)
 					break;
-				if (texpacks_rate > 0)
+				if (texpacks_rate > 0 && virtual_clock)
+				{
+					// These bytes are due once the shelf has run long enough for them at the rate (in its own time).
+					const double due = t0 + static_cast<double>(sent + n) / (texpacks_rate * 1024.0);
+					if (vclock.load() < due)
+					{
+						vdownload = 2;
+						while (vclock.load() < due && vabort.load() == generation)
+							std::this_thread::sleep_for(std::chrono::microseconds(200));
+						vdownload = 1;
+					}
+					if (vabort.load() != generation)
+					{
+						if (f)
+							std::fclose(f);
+						return -2;
+					}
+				}
+				else if (texpacks_rate > 0)
 					std::this_thread::sleep_for(std::chrono::microseconds(static_cast<long long>(n / (texpacks_rate * 1024.0) * 1e6)));
+				sent += n;
 				if (!sink(buf.data(), n))
 				{
 					if (f)
@@ -536,6 +657,15 @@ int main(int argc, char** argv)
 			struct statvfs v;
 			return statvfs(dir.c_str(), &v) == 0 ? static_cast<uint64_t>(v.f_bavail) * v.f_frsize : UINT64_MAX;
 		};
+		if (virtual_clock)
+		{
+			tp.now = [&vclock, &vclock_real] {
+				if (vclock_real.load())
+					return 1e9 + std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+				return vclock.load();
+			};
+			tp.abort = [&vabort] { vabort++; };
+		}
 		tp.log = [](const std::string& line) { std::printf("%s\n", line.c_str()); };
 		tp.notify = [](const std::string& game, bool ok, const std::string& detail) {
 			std::printf("[host] popup: HD textures %s: %s (%s)\n", ok ? "ready" : "failed", game.c_str(), detail.c_str());
@@ -545,11 +675,32 @@ int main(int argc, char** argv)
 		packs->Start();
 		acfg.texture_packs = packs->Service();
 	}
-	acfg.build_tag = "vk-285-114 (host)";
+	// 2026-10-08: the shelf's sounds for --record-audio, mixed a frame at a time while recording.
+	Mixer* mixer = nullptr;
+	if (!record_audio.empty())
+	{
+		mixer = new Mixer();
+		mixer->Build();
+		acfg.sound = mixer;
+	}
+	acfg.build_tag = build_tag;
 	acfg.options = op;
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games' "PS2 system menu" row
 	// vk-285-135: the folder picker's places: the data folder (as /data/PCSX2) and two "drives" in it, when they are folders.
 	acfg.folder_places = {{"PS5SX2's folder", data}, {"USB drive 1", data + "/usb0"}, {"Extended storage", data + "/ext0"}};
+	if (!places.empty())
+	{
+		acfg.folder_places.clear();
+		for (size_t at = 0; at <= places.size();)
+		{
+			const size_t bar = std::min(places.find('|', at), places.size());
+			const std::string one = places.substr(at, bar - at);
+			const size_t eq = one.find('=');
+			if (eq != std::string::npos)
+				acfg.folder_places.push_back({one.substr(0, eq), one.substr(eq + 1)});
+			at = bar + 1;
+		}
+	}
 	if (no_bios)
 	{
 		acfg.bios_present = [] { return false; };
@@ -579,12 +730,54 @@ int main(int argc, char** argv)
 	Input in;
 	FrameDesc frame;
 	uint32_t index = 0;
+	// 2026-10-08: --record pipes every frame (every other one at 30 fps) to ffmpeg.
+	FILE* rec = nullptr;
+	unsigned rec_step = 0, rec_frames = 0;
+	bool rec_on = std::none_of(steps.begin(), steps.end(), [](const Step& st) { return st.op == "rec"; });
+	std::vector<int16_t> audio; // interleaved stereo at SoundBank::kRate
+	std::vector<float> mix(static_cast<size_t>(SoundBank::kRate / 60) * 2);
+	if (!record.empty())
+	{
+		const std::string cmd = "ffmpeg -loglevel error -y -f rawvideo -pix_fmt rgba -s " + std::to_string(w) + "x" + std::to_string(h) +
+		                        " -r " + std::to_string(record_fps) + " -i - -c:v libx264 -preset slow -crf 10 -pix_fmt yuv420p '" + record + "'";
+		rec = popen(cmd.c_str(), "w");
+		if (!rec)
+		{
+			std::fprintf(stderr, "[host] could not start ffmpeg for %s\n", record.c_str());
+			return 1;
+		}
+	}
 	// Update and Build every frame, as the console's loop does (the sheet's scroll target is worked out in Build).
 	auto run = [&](double seconds) {
 		for (double t = 0; t < seconds - 1e-9; t += dt)
 		{
+			if (virtual_clock)
+			{
+				while (vdownload.load() == 1)
+					std::this_thread::sleep_for(std::chrono::microseconds(200));
+				vclock.store(vclock.load() + dt);
+			}
 			app.Update(dt, in);
 			app.Build(frame, "21:47");
+			if (mixer)
+			{
+				// Every frame's 1/60 s of sound, kept while recording (the voices play on either way).
+				mixer->Mix(mix.data(), SoundBank::kRate / 60);
+				if (rec_on)
+					for (float x : mix)
+						audio.push_back(static_cast<int16_t>(std::lround(std::clamp(x, -1.0f, 1.0f) * 32767.0f)));
+			}
+			if (rec && rec_on && (rec_step++ % (60 / record_fps)) == 0)
+			{
+				std::vector<uint8_t> rgba;
+				if (renderer.Render(frame, index, VK_NULL_HANDLE, VK_NULL_HANDLE) && renderer.ReadPixels(index, rgba) &&
+					rgba.size() == static_cast<size_t>(w) * h * 4)
+				{
+					std::fwrite(rgba.data(), 1, rgba.size(), rec);
+					rec_frames++;
+				}
+				index ^= 1;
+			}
 		}
 	};
 	int failures = 0;
@@ -604,6 +797,13 @@ int main(int argc, char** argv)
 				SetButton(in, s.arg, false);
 				run(dt * 2);
 			}
+		else if (s.op == "rec")
+		{
+			rec_on = s.arg == "on";
+			rec_step = 0;
+			if (rec)
+				std::printf("[host] rec %s at frame %u\n", rec_on ? "on" : "off", rec_frames); // where the cuts are
+		}
 		else if (s.op == "sleep")
 		{
 			const double until = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() + s.seconds;
@@ -675,7 +875,43 @@ int main(int argc, char** argv)
 				std::printf("[host] %s\n", path.c_str());
 		}
 	}
+	if (rec)
+	{
+		const int rc = pclose(rec);
+		std::printf("[host] recorded %u frames at %d fps to %s (ffmpeg %d)\n", rec_frames, record_fps, record.c_str(), rc);
+		if (rc != 0)
+			failures++;
+	}
+	if (mixer)
+	{
+		// A plain 16-bit PCM WAV.
+		std::vector<uint8_t> wav;
+		auto u32 = [&](uint32_t v) { for (int b = 0; b < 4; b++) wav.push_back(static_cast<uint8_t>(v >> (8 * b))); };
+		auto u16 = [&](uint16_t v) { wav.push_back(static_cast<uint8_t>(v)); wav.push_back(static_cast<uint8_t>(v >> 8)); };
+		const uint32_t bytes = static_cast<uint32_t>(audio.size() * 2);
+		wav.insert(wav.end(), {'R', 'I', 'F', 'F'});
+		u32(36 + bytes);
+		wav.insert(wav.end(), {'W', 'A', 'V', 'E', 'f', 'm', 't', ' '});
+		u32(16);
+		u16(1);
+		u16(2);
+		u32(SoundBank::kRate);
+		u32(SoundBank::kRate * 4);
+		u16(4);
+		u16(16);
+		wav.insert(wav.end(), {'d', 'a', 't', 'a'});
+		u32(bytes);
+		const uint8_t* pcm = reinterpret_cast<const uint8_t*>(audio.data());
+		wav.insert(wav.end(), pcm, pcm + bytes);
+		std::ofstream f(record_audio, std::ios::binary);
+		f.write(reinterpret_cast<const char*>(wav.data()), static_cast<std::streamsize>(wav.size()));
+		std::printf("[host] recorded %.2f s of the shelf's sounds to %s\n", static_cast<double>(audio.size() / 2) / SoundBank::kRate,
+			record_audio.c_str());
+		if (!f)
+			failures++;
+	}
 	covers->Stop();
+	vclock_real = true;
 	if (packs && packs->Stop(3000))
 		delete packs;
 	app.Shutdown();
