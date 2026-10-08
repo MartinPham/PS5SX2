@@ -2170,6 +2170,45 @@ static void orbis_set_aside_shader_caches()
 // Vice City (2x) hung that way ("completion marker not written within 2 s", the vk-285-13..15 signature) on the one
 // console with no flags. The opt-in flags (vk_widemem, vk_triple, vk_recordthread, vk_fullstatecopy, vk_16k and the
 // vk_no* switches) still need their files.
+// vk-285-133 (AI-assisted): the title's param.json for ps5vk's 120 Hz mode (frame generation). The driver offers the 119.88 Hz
+// mode only when the title's param.json declares high frame rates (attribute3 0x80040), and it read /app0/sce_sys/param.json,
+// which after the jailbreak doesn't lead to our folder: vk-285-131 on the console never offered the mode, and the TV stayed at
+// 60 Hz. PS5VK_PARAM_JSON names our own folder's copy instead (the first of these that opens), and what it declares is logged
+// here, since the driver's own lines go to stderr.log.
+static void orbis_vk_param_json()
+{
+  static const char* const paths[] = {"/data/homebrew/PPSA99203/sce_sys/param.json", "/app0/sce_sys/param.json",
+                                      "/mnt/sandbox/PPSA99203_000/app0/sce_sys/param.json"};
+  std::string tried;
+  for (const char* path : paths)
+  {
+    FILE* const file = fopen(path, "rb");
+    if (!file)
+    {
+      tried += std::string(tried.empty() ? "" : ", ") + path + " (errno " + std::to_string(errno) + ")";
+      continue;
+    }
+    static char text[16384];
+    const size_t length = fread(text, 1, sizeof(text) - 1, file);
+    fclose(file);
+    text[length] = '\0';
+    const char* at = strstr(text, "\"attribute3\"");
+    if (at)
+      at = strchr(at, ':');
+    const unsigned long attribute3 = at ? strtoul(at + 1, nullptr, 0) : 0;
+    const bool declared = at && (attribute3 & 0x80040ul) == 0x80040ul;
+    setenv("PS5VK_PARAM_JSON", path, 0);
+    printf("[boot] param.json for the 120 Hz mode: %s, attribute3 %s0x%lx: %s\n", path, at ? "" : "absent, ", attribute3,
+      declared ? "high frame rates declared, so the driver offers 119.88 Hz (frame generation asks for it)"
+               : "high frame rates (0x80040) not declared, so the display stays at 60 Hz (the param.json that comes "
+                 "with this build declares them)");
+    fflush(stdout);
+    return;
+  }
+  printf("[boot] param.json for the 120 Hz mode: none opened (%s); the display stays at 60 Hz\n", tried.c_str());
+  fflush(stdout);
+}
+
 static void orbis_vk_environment()
 {
   const bool hw = !g_sw_renderer;
@@ -2189,6 +2228,7 @@ static void orbis_vk_environment()
   }
   // The driver keeps its compiled shaders next to PCSX2's caches, not in /app0.
   setenv("PS5VK_SHADER_CACHE_DIR", (OrbisDir("cache") + "/ps5vk-shader-cache").c_str(), 0); // vk-285-33: cache/
+  orbis_vk_param_json(); // vk-285-133: before the frontend's swapchain, the driver's first look at the modes
   // The driver's queue profile (a stderr.log line every 10 s) unless novkprof.
   if (!orbis_flag("novkprof")) setenv("PS5VK_PROFILE", "1", 0);
   // vk-285-14: on a GPU hang the driver writes the hung step's words and register tables here
@@ -2257,7 +2297,7 @@ static void orbis_vk_environment()
   {
     static const char* const names[] = {"PS5VK_FULL_STATE", "PS5VK_WAR_BARRIER", "PS5VK_LAZY_TARGET_FLUSH", "PS5VK_LIVE_DIR",
                                         "PS5VK_MAX_EXTENT_2D", "PS5VK_GPU_UPLOAD", "PS5VK_BREADCRUMBS", "PS5VK_WIDE_MEMORY",
-                                        "PS5VK_SWAPCHAIN_IMAGES", "PS5VK_HANG_DUMP"};
+                                        "PS5VK_SWAPCHAIN_IMAGES", "PS5VK_HANG_DUMP", "PS5VK_PARAM_JSON"};
     std::string line;
     for (const char* name : names)
     {

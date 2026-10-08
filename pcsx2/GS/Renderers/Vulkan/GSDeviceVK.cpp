@@ -46,6 +46,7 @@
 #include "OrbisDeferredLog.h"
 #ifdef ORBIS_VULKAN
 #include "ps5/coreorbis/orbis-shims/ps5_framegen.h" // 2026-10-08: frame generation
+#include "ps5/coreorbis/orbis-shims/OrbisFrameGenPacing.h" // vk-285-133: its pacing
 #endif
 #define printf OrbisDeferredPrintf
 #define fflush OrbisDeferredFlush
@@ -4402,8 +4403,12 @@ void OrbisVkPresentBlend(GSTexture* tex, const GSVector4& sRect, const GSVector4
 // the watermark, the QR panel) are drawn over both. The TV is in its 120 Hz mode where the console allows it (VKSwapChain.cpp picks
 // the mode, the driver configures VideoOut): a 60 fps game is shown at 120, a 30 fps one gets its generated frame twice. At 60 Hz
 // only a game at 30 fps or less gets frames made. File statics, not members: GSDeviceVK's layout stays as it was.
+// vk-285-133: paced in the PS2's vsyncs (ps5/coreorbis/orbis-shims/OrbisFrameGenPacing.h; vk-285-131's wall-clock pacing slowed
+// a 60 fps game at 60 Hz to 30 fps), with a pause when the game slows while frames are generated; nothing is recorded while there
+// is no room for a generated frame (a 60 fps game at 60 Hz), and the interpolator is only made once there is.
 bool g_orbis_fg_wanted = false; // main-boot.cpp sets it from PS5SX2/FrameGeneration before the GS opens
 std::atomic<bool> g_orbis_fg_active{false}; // frames are being generated (the FPS box says "FG")
+bool g_orbis_fg_engaged = false; // vk-285-133: the pacing has room for generated frames (GSRenderer.cpp skips the repeats then)
 
 // The driver's measured refresh of the output its swapchain presents to (ps5vk's high-frame-rate output, 2026-10-08); a driver
 // without it presents at 59.94 Hz.
@@ -4419,14 +4424,14 @@ namespace
 		std::unique_ptr<GSTextureVK> output;    // the generated frame
 		bool failed = false;     // it could not start: not tried again in this game
 		bool prepared = false;   // the wrappers know the images are the interpolator's (GENERAL)
-		bool reset_next = true;
+		bool reset_next = true;  // the interpolator was (re)made: its first frame has no neighbour
 		bool have_output = false;
-		u32 repeats = 1;         // presents of the generated frame before the game's
 		double hz = 59.94;
-		double interval_ms = 0.0; // the game's frames' interval, a running mean
-		std::chrono::steady_clock::time_point last_frame{};
+		orbis_fg::Pacing pacing; // vk-285-133
 		std::chrono::steady_clock::time_point stat_start{};
-		u64 stat_frames = 0, stat_made = 0, stat_presents = 0;
+		std::chrono::steady_clock::time_point last_room_log{};
+		u64 stat_frames = 0, stat_engaged = 0, stat_made = 0, stat_presents = 0;
+		double stat_vsyncs = 0.0;
 	};
 
 	OrbisFrameGenState s_orbis_fg;
@@ -4474,17 +4479,114 @@ void GSDeviceVK::OrbisFrameGenRelease()
 	s.fg.reset();
 	s.prepared = false;
 	s.reset_next = true;
+	s.have_output = false;
 	g_orbis_fg_active.store(false, std::memory_order_relaxed);
 }
 
+namespace
+{
+	// vk-285-133: the pacing's news, for boot.log. A room change (engaged/disengaged) at most once in 5 s: a game that hovers at
+	// the edge would fill the log; the 10 s status line says where it is anyway.
+	void OrbisFrameGenLogEvent(OrbisFrameGenState& s, orbis_fg::Event event, std::chrono::steady_clock::time_point now, double ps2_hz,
+		double speed, bool nominal)
+	{
+		const orbis_fg::Pacing& p = s.pacing;
+		switch (event)
+		{
+			case orbis_fg::Event::None:
+				return;
+			case orbis_fg::Event::Engaged:
+			case orbis_fg::Event::Disengaged:
+				if (s.last_room_log != std::chrono::steady_clock::time_point{} && now - s.last_room_log < std::chrono::seconds(5))
+					return;
+				s.last_room_log = now;
+				if (event == orbis_fg::Event::Engaged)
+					printf("[fg] generating: a new frame every %.2f PS2 vsyncs (%.2f Hz), %.2f refreshes each at %.2f Hz; the generated "
+						   "frame presented %u time(s) before the game's\n",
+						p.MeanVsyncs(), ps2_hz, p.Refreshes(), s.hz, p.Repeats());
+				else if (!nominal)
+					printf("[fg] not generating: the frame limiter isn't at normal speed (turbo, slow motion or the fast boot)\n");
+				else
+					printf("[fg] not generating: a new frame every %.2f PS2 vsyncs (%.2f Hz) is %.2f refreshes at %.2f Hz, no room for "
+						   "another%s\n",
+						p.MeanVsyncs(), ps2_hz, p.Refreshes(), s.hz,
+						s.hz < 90.0 ? " (at 60 Hz only games at 30 fps or less get generated frames; 60 fps ones need the 120 Hz "
+									  "output)" :
+									  "");
+				break;
+			case orbis_fg::Event::Paused:
+				printf("[fg] paused for %.0f s: the game ran at %.0f%% for 3 s while frames were generated (the floor %.0f%%)\n",
+					p.PauseSeconds(), p.SlowSpeed(), p.PauseFloor());
+				break;
+			case orbis_fg::Event::ResumedCostly:
+				printf("[fg] generating again: %.0f%% without generated frames against %.0f%% with them, so they cost speed here; if "
+					   "it slows again the pause is twice as long\n",
+					p.NoFgSpeed(), p.SlowSpeed());
+				break;
+			case orbis_fg::Event::ResumedSlowGame:
+				printf("[fg] generating again: %.0f%% without generated frames, as slow as with them (%.0f%%): the game is slow by "
+					   "itself here, so %.0f%% is the floor for a minute\n",
+					p.NoFgSpeed(), p.SlowSpeed(), p.NoFgSpeed() - orbis_fg::Pacing::kCostly < orbis_fg::Pacing::kSlowSpeed ?
+																	  p.NoFgSpeed() - orbis_fg::Pacing::kCostly :
+																	  orbis_fg::Pacing::kSlowSpeed);
+				break;
+		}
+		(void)speed;
+		fflush(stdout);
+	}
+}
+
 u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader,
-	float shader_time, Filter filter)
+	float shader_time, Filter filter, u32 vsyncs, double ps2_hz, float speed, bool nominal)
 {
 	OrbisFrameGenState& s = s_orbis_fg;
 	s.have_output = false;
 
 	if (!g_orbis_fg_wanted || s.failed || !m_swap_chain || !current)
+	{
+		g_orbis_fg_engaged = false;
+		g_orbis_fg_active.store(false, std::memory_order_relaxed);
 		return 0;
+	}
+
+	// The pacing (vk-285-133): the game's frames in PS2 vsyncs against the display's refreshes, and the speed.
+	const auto now = std::chrono::steady_clock::now();
+	const double now_s = std::chrono::duration<double>(now.time_since_epoch()).count();
+	s.hz = OrbisFrameGenDisplayHz(); // the driver's, each frame: the output goes back to 60 Hz before the process ends
+	const orbis_fg::Decision decision = s.pacing.Frame(vsyncs, ps2_hz, s.hz, now_s, speed, nominal);
+	OrbisFrameGenLogEvent(s, s.pacing.TakeEvent(), now, ps2_hz, speed, nominal);
+	g_orbis_fg_engaged = decision.engaged;
+
+	// A status line every 10 s, generating or not.
+	if (s.stat_start == std::chrono::steady_clock::time_point{})
+		s.stat_start = now;
+	s.stat_frames++;
+	s.stat_vsyncs += vsyncs;
+	s.stat_engaged += decision.engaged ? 1 : 0;
+	if (const double secs = std::chrono::duration<double>(now - s.stat_start).count(); secs >= 10.0)
+	{
+		double gpu_ms = 0.0, gpu_max = 0.0, flow_ms = 0.0;
+		u32 timed = 0;
+		const bool have_gpu = s.fg && s.fg->take_gpu_time(gpu_ms, gpu_max, timed, flow_ms);
+		printf("[fg] %.1f game fps (%.2f PS2 vsyncs a frame at %.2f Hz), %.1f generated frames a second, %.1f presents each, "
+			   "display %.2f Hz, speed %.0f%%, %s%s\n",
+			s.stat_frames / secs, s.stat_frames ? s.stat_vsyncs / s.stat_frames : 0.0, ps2_hz, s.stat_made / secs,
+			s.stat_made ? static_cast<double>(s.stat_presents) / s.stat_made : 0.0, s.hz, speed,
+			s.pacing.Paused() ? "paused (the game slowed)" :
+			s.stat_engaged == 0 ? "no room for generated frames" :
+			s.stat_engaged < s.stat_frames ? "generating part of the time" : "generating",
+			have_gpu ? fmt::format("; GPU {:.2f} ms a frame ({:.2f} the optical flow), most {:.2f}", gpu_ms, flow_ms, gpu_max).c_str() : "");
+		fflush(stdout);
+		s.stat_start = now;
+		s.stat_frames = s.stat_engaged = s.stat_made = s.stat_presents = 0;
+		s.stat_vsyncs = 0.0;
+	}
+
+	if (!decision.engaged)
+	{
+		g_orbis_fg_active.store(false, std::memory_order_relaxed);
+		return 0;
+	}
 
 	const u32 w = static_cast<u32>(GetWindowWidth());
 	const u32 h = static_cast<u32>(GetWindowHeight());
@@ -4503,6 +4605,7 @@ u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv,
 			fflush(stdout);
 			s.fg.reset();
 			s.failed = true;
+			g_orbis_fg_engaged = false;
 			return 0;
 		}
 
@@ -4524,19 +4627,14 @@ u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv,
 			fflush(stdout);
 			OrbisFrameGenRelease();
 			s.failed = true;
+			g_orbis_fg_engaged = false;
 			return 0;
 		}
 
-		s.hz = OrbisFrameGenDisplayHz();
 		s.prepared = false;
 		s.reset_next = true;
-		s.interval_ms = 0.0;
-		s.last_frame = {};
-		s.stat_start = std::chrono::steady_clock::now();
-		s.stat_frames = s.stat_made = s.stat_presents = 0;
-		printf("[fg] ready for %ux%u in %.0f ms; the display at %.2f Hz%s\n", w, h,
-			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), s.hz,
-			s.hz > 90.0 ? " (60 fps games are shown at 120)" : " (60 Hz: only games at 30 fps or less get frames made)");
+		printf("[fg] ready for %ux%u in %.0f ms; the display at %.2f Hz\n", w, h,
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), s.hz);
 		fflush(stdout);
 	}
 
@@ -4573,6 +4671,7 @@ u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv,
 			printf("[fg] no framebuffer for the frame image; frame generation stays off in this game\n");
 			fflush(stdout);
 			s.failed = true;
+			g_orbis_fg_engaged = false;
 			return 0;
 		}
 
@@ -4590,64 +4689,23 @@ u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv,
 		InvalidateCachedState(); // the pass and the state were set by hand
 	}
 
-	// The pacing (RPCS3-PS5 m73b): the game's frame interval in refreshes; the generated frame takes about half of it, once at 60 fps
-	// on a 120 Hz display, twice at 30, three times at 20. At 60 Hz only a game at 30 fps or less gets one.
-	const auto now = std::chrono::steady_clock::now();
-
-	if (s.last_frame != std::chrono::steady_clock::time_point{})
-	{
-		const double dt = std::chrono::duration<double, std::milli>(now - s.last_frame).count();
-
-		if (dt > 4.0 && dt < 250.0)
-			s.interval_ms = s.interval_ms > 0.0 ? s.interval_ms * 0.85 + dt * 0.15 : dt;
-		else if (dt >= 250.0)
-			s.reset_next = true; // a pause, a load: the last frame is no neighbour of this one
-	}
-
-	s.last_frame = now;
-	s.hz = OrbisFrameGenDisplayHz(); // the driver's, each frame: the output goes back to 60 Hz before the process ends
-	const double refreshes = s.interval_ms > 0.0 ? s.interval_ms * s.hz / 1000.0 : (s.hz > 90.0 ? 2.0 : 1.0);
-	const double half = refreshes / 2.0;
-
-	while (s.repeats < 3 && half >= s.repeats + 0.9)
-		s.repeats++;
-	while (s.repeats > 1 && half < s.repeats - 0.2)
-		s.repeats--;
-
-	const bool fits = refreshes >= 1.6; // a frame shown for less than two refreshes leaves no room for another
 	fg.set_generated(1);
-	const bool made = fg.record(cmd, s.reset_next);
+	const bool made = fg.record(cmd, decision.reset || s.reset_next);
 	s.reset_next = false;
 
 	if (made)
 	{
 		s.output->OverrideImageLayout(GSTextureVK::Layout::ComputeReadWriteImage); // record() wrote it in GENERAL
 		s.output->TransitionToLayout(cmd, GSTextureVK::Layout::ShaderReadOnly);  // read in the present pass, which can't transition
-		s.have_output = fits;
+		s.have_output = decision.presents > 0;
 	}
 
 	fg.advance();
 
-	// A status line every 10 s.
-	s.stat_frames++;
-	s.stat_made += (made && fits) ? 1 : 0;
-	s.stat_presents += (made && fits) ? s.repeats : 0;
-
-	if (const double secs = std::chrono::duration<double>(now - s.stat_start).count(); secs >= 10.0)
-	{
-		double gpu_ms = 0.0, gpu_max = 0.0, flow_ms = 0.0;
-		u32 timed = 0;
-		const bool have_gpu = fg.take_gpu_time(gpu_ms, gpu_max, timed, flow_ms);
-		printf("[fg] %.1f game fps, %.1f generated frames a second, %u present(s) each, display %.2f Hz%s\n", s.stat_frames / secs,
-			s.stat_made / secs, s.repeats, s.hz,
-			have_gpu ? fmt::format("; GPU {:.2f} ms a frame ({:.2f} the optical flow), most {:.2f}", gpu_ms, flow_ms, gpu_max).c_str() : "");
-		fflush(stdout);
-		s.stat_start = now;
-		s.stat_frames = s.stat_made = s.stat_presents = 0;
-	}
-
-	g_orbis_fg_active.store(s.have_output, std::memory_order_relaxed);
-	return s.have_output ? s.repeats : 0;
+	s.stat_made += s.have_output ? 1 : 0;
+	s.stat_presents += s.have_output ? decision.presents : 0;
+	g_orbis_fg_active.store(true, std::memory_order_relaxed); // the box's "FG": generating, even on a frame too short for one
+	return s.have_output ? decision.presents : 0;
 }
 
 void GSDeviceVK::OrbisFrameGenDraw()
@@ -4664,10 +4722,10 @@ void GSDeviceVK::OrbisFrameGenDraw()
 
 // For GSRenderer.cpp, which doesn't include this header.
 u32 OrbisVkFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader, float shader_time,
-	Filter filter)
+	Filter filter, u32 vsyncs, double ps2_hz, float speed, bool nominal)
 {
 	GSDeviceVK* const dev = GSDeviceVK::GetInstance();
-	return dev ? dev->OrbisFrameGenRecord(current, src_uv, draw_rect, shader, shader_time, filter) : 0;
+	return dev ? dev->OrbisFrameGenRecord(current, src_uv, draw_rect, shader, shader_time, filter, vsyncs, ps2_hz, speed, nominal) : 0;
 }
 
 void OrbisVkFrameGenDraw()

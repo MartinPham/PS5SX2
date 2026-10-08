@@ -1069,9 +1069,12 @@ static void OrbisPerfMinute(unsigned fps, float speed, float ee, float gs, float
 void OrbisVkPresentBlend(GSTexture* tex, const GSVector4& sRect, const GSVector4& dRect); // GSDeviceVK.cpp
 // 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp, "frame generation").
 extern bool g_orbis_fg_wanted;
+extern bool g_orbis_fg_engaged; // vk-285-133: generated frames have room (the repeats of the game's last frame present nothing then)
 u32 OrbisVkFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader, float shader_time,
-	Filter filter);
+	Filter filter, u32 vsyncs, double ps2_hz, float speed, bool nominal);
 void OrbisVkFrameGenDraw();
+// vk-285-133: the PS2 vsyncs since the game's last new frame (what frame generation's pacing counts in), GS thread only.
+static u32 s_orbis_fg_vsyncs = 0;
 
 // Test build 1: the TESTING watermark in the middle of the game's picture, faint (its opacity is in
 // the image), sized for the display's height. The texture is made once per GS device.
@@ -2634,8 +2637,19 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 	const int fb_sprite_blits = g_perfmon.GetDisplayFramebufferSpriteBlits();
 	const bool fb_sprite_frame = (fb_sprite_blits > 0);
 
+#ifdef ORBIS_VULKAN
+	// vk-285-133: frame generation's clock, a PS2 vsync each call. While generated frames have room (g_orbis_fg_engaged), a
+	// vsync that only repeats the game's last frame presents nothing, whatever "Skip duplicate frames" says: the generated
+	// frame was presented in its place, and a repeat on top would ask the display for more refreshes than the PS2 gives
+	// (vk-285-131 at 60 Hz: two presents a vsync, half speed).
+	s_orbis_fg_vsyncs++;
+	const bool fg_skips_repeats = g_orbis_fg_wanted && g_orbis_fg_engaged;
+#else
+	constexpr bool fg_skips_repeats = false;
+#endif
+
 	bool skip_frame = false;
-	if (GSConfig.SkipDuplicateFrames && !GSCapture::IsCapturingVideo())
+	if ((GSConfig.SkipDuplicateFrames || fg_skips_repeats) && !GSCapture::IsCapturingVideo())
 	{
 		bool is_unique_frame;
 		switch (PerformanceMetrics::GetInternalFPSMethod())
@@ -2776,8 +2790,16 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		{
 			const float fg_time = static_cast<float>(
 				Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - m_shader_time_start));
+			// vk-285-133: the pacing's inputs: the vsyncs this frame took, the PS2's rate, the speed, and the limiter (turbo, slow
+			// motion and the fast boot get no generated frames).
+			const u32 fg_vsyncs = s_orbis_fg_vsyncs;
+			s_orbis_fg_vsyncs = 0;
+			const float fg_target = VMManager::GetTargetSpeed();
+			const bool fg_nominal =
+				VMManager::GetLimiterMode() == LimiterModeType::Nominal && fg_target > 0.5f && fg_target < 1.05f;
 			const u32 generated_presents = OrbisVkFrameGenRecord(current, src_uv, draw_rect, s_tv_shader_indices[GSConfig.TVShader],
-				fg_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off));
+				fg_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off), fg_vsyncs, GetVerticalFrequency(),
+				PerformanceMetrics::GetSpeed(), fg_nominal);
 
 			for (u32 i = 0; i < generated_presents; i++)
 			{
