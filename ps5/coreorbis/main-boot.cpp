@@ -62,6 +62,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "orbis-shims/OrbisTextureRoots.h" // vk-285-113: a game's texture pack on a USB drive
 #include "orbis-shims/ProsperoKbdMouse.h" // vk-285-72, vk-285-113: the PS5's USB keyboard and mouse
 #include "orbis-shims/OrbisPadMap.h"     // vk-285-116: the controller remapping
+#include "OrbisNfs.h"                     // vk-285-135: games on NFS shares
 #include <mutex>
 #include <set> // vk-285-134
 // vk-285-108 (GSRenderer.cpp): the helper threads' CPUs and the ticker's heartbeat for the GS thread's watchdog.
@@ -1913,6 +1914,37 @@ static std::vector<std::string> orbis_extra_game_folders(const char* when)
   return dirs;
 }
 
+// vk-285-135 (AI-assisted; testers: "nfs mounting"): gs.ini's PS5SX2/NfsShares, nfs:// addresses separated by ';' (the
+// settings page's Folders group, the shelf's folder picker), mounted after the jailbreak (orbis-shims/OrbisNfs.cpp: the
+// app's own NFS client) and listed like the drives: each share's folder under /nfs/<host>/<path>. All at once, each try
+// giving up after 5 s; a share that didn't mount is said in boot.log and left out, and the shelf starts without it.
+static std::vector<std::string> orbis_nfs_game_folders(const char* when)
+{
+  std::vector<std::string> dirs;
+  const std::string list = orbis_gs_ini_string("NfsShares");
+  if (list.find_first_not_of(" \t\r\n;") == std::string::npos)
+  {
+    OrbisNfs::SetShares(std::string());
+    return dirs;
+  }
+  std::vector<std::string> problems;
+  OrbisNfs::SetShares(list, &problems);
+  for (const std::string& p : problems)
+    printf("[boot] %s: NFS share left out (PS5SX2/NfsShares): %s\n", when, p.c_str());
+  const auto t0 = std::chrono::steady_clock::now();
+  for (const OrbisNfs::ShareInfo& s : OrbisNfs::MountAll(5000))
+  {
+    printf("[boot] %s: NFS share %s: %s%s\n", when, s.url.c_str(), s.state.c_str(),
+      s.mounted ? (", its games listed from " + s.mount_point).c_str() : "");
+    if (s.mounted)
+      dirs.push_back(s.mount_point);
+  }
+  printf("[boot] %s: NFS shares looked at in %.2f s\n", when,
+    std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
+  fflush(stdout);
+  return dirs;
+}
+
 static void orbis_scan_usb(const char* when)
 {
   s_usb_dirs = orbis_usb_game_dirs(when);
@@ -1920,6 +1952,15 @@ static void orbis_scan_usb(const char* when)
   {
     if (std::find(s_usb_dirs.begin(), s_usb_dirs.end(), dir) == s_usb_dirs.end())
       s_usb_dirs.push_back(dir);
+  }
+  // vk-285-135: the NFS shares, once the jailbreak gave the app the network's sockets and /data.
+  if (std::strcmp(when, "after the jailbreak") == 0)
+  {
+    for (const std::string& dir : orbis_nfs_game_folders(when))
+    {
+      if (std::find(s_usb_dirs.begin(), s_usb_dirs.end(), dir) == s_usb_dirs.end())
+        s_usb_dirs.push_back(dir);
+    }
   }
 }
 

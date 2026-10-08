@@ -14,6 +14,7 @@ to the releases:
 | `lz4/` | LZ4 1.10.0 (`lz4-1.10.0.tar.gz`, github.com/lz4/lz4 releases) | `537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b` | BSD 2-Clause (`lz4/LICENSE`, the library's) |
 | `libarchive/` | libarchive 3.8.9 (`libarchive-3.8.9.tar.xz`, libarchive.org/downloads) | `888c934f9d95648ecb9163dc8e23ab80a476ecb81a8f1154704a227b5b676dde` | BSD 2-Clause (`libarchive/COPYING`); the BLAKE2 files are CC0/OpenSSL/Apache 2.0, used under CC0 |
 | `mbedtls/` | Mbed TLS 3.6.7 (`mbedtls-3.6.7.tar.bz2`, github.com/Mbed-TLS/mbedtls releases) | `a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6` | Apache-2.0 OR GPL-2.0-or-later (`mbedtls/LICENSE`), used under GPL-2.0-or-later |
+| `libnfs/` | libnfs 18.0.0, git `7613236464317bee2d9636f087f995148de4db27` (github.com/sahlberg/libnfs) | (a git commit, no tarball) | LGPL-2.1-or-later (`libnfs/LICENCE-LGPL-2.1.txt`; `COPYING` says which files), used under GPL-3.0; the XDR files are BSD (`LICENCE-BSD.txt`) |
 
 - **zlib:** inflate only: `adler32.c crc32.c inffast.c inflate.c inftrees.c zutil.c` and their headers
   (`gzguts.h` because `zutil.c` includes it). No deflate, no gz* file functions.
@@ -43,4 +44,13 @@ to the releases:
   `16be3f6feb15408195dcfe3aa1a75ef9db72f646b96ebbefdc68f56255f799f8`, the same as that tag on GitHub) by
   `ps5/frontend/host/make-https-roots.py`. Tests: `ps5/frontend/host/test-https.sh`.
 
-`ps5/coreorbis/Makefile.vk` builds them (`CHD_CSRCS`, `LZ4_CSRCS`, `LIBARCHIVE_CSRCS`, `MBEDTLS_CSRCS`).
+- **libnfs** (vk-285-135, AI-assisted): games on NFS shares (`ps5/coreorbis/orbis-shims/OrbisNfs.cpp`); the console's
+  kernel has no NFS client. The library and the NFS v3, v4, MOUNT and portmapper protocol code: `lib/` (without the Windows
+  `.def`), `include/`, `mount/`, `nfs/`, `nfs4/` and `portmap/` (the `.c`, `.h` and `.x` files), byte-identical to the
+  commit but for one change in `lib/socket.c` (`create_socket`, marked PS5SX2: `SO_NOSIGPIPE` on the console's sockets).
+  `config.h` is ours: `config_ps5.h` is what libnfs's CMake checks found with `prospero-cmake` (multithreading, tests,
+  utilities and examples off), changed by hand where its header says (clock_gettime on, getpwuid and the process-wide
+  SIGPIPE handler off); `config_linux.h` is the same build on Linux, for `ps5/coreorbis/tests/nfs/test-nfs.sh`. No
+  Kerberos, no TLS, no NLM/NSM/rquota.
+
+`ps5/coreorbis/Makefile.vk` builds them (`CHD_CSRCS`, `LZ4_CSRCS`, `LIBARCHIVE_CSRCS`, `MBEDTLS_CSRCS`, `NFS_CSRCS`).

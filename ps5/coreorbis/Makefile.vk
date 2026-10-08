@@ -314,6 +314,15 @@ MBEDTLS_CSRCS := $(addprefix $(PS5_THIRD)/mbedtls/library/,$(MBEDTLS_FILES)) $(P
 MBEDTLS_FLAGS := -DMBEDTLS_CONFIG_FILE='"ps5sx2_mbedtls_config.h"' -I$(PS5_THIRD)/mbedtls/port -I$(PS5_THIRD)/mbedtls/include
 C_SRCS := $(C_SRCS) $(MBEDTLS_CSRCS)
 
+# vk-285-135 (AI-assisted): libnfs, for games on NFS shares (orbis-shims/OrbisNfs.cpp; the console's kernel has no NFS
+# client). ps5/third_party/README.md says what is vendored and how its config.h was made. link-vk.sh routes the C
+# library's file calls through OrbisNfs.cpp (orbis-shims/OrbisNfs.wrap).
+NFS_DIR := $(PS5_THIRD)/libnfs
+NFS_CSRCS := $(wildcard $(NFS_DIR)/lib/*.c) $(wildcard $(NFS_DIR)/mount/*.c) $(wildcard $(NFS_DIR)/nfs/*.c) \
+  $(wildcard $(NFS_DIR)/nfs4/*.c) $(wildcard $(NFS_DIR)/portmap/*.c)
+NFS_INCLUDES := -I$(NFS_DIR)/include
+C_SRCS := $(C_SRCS) $(NFS_CSRCS)
+
 # The GL build's shims minus glprobe, GLContextPS5 and gl_loader_table; plus the
 # shaderc shim and the Vulkan build's stand-ins for GL-only hooks.
 SHIM_SRCS := ./orbis-shims/ProsperoInput.cpp ./orbis-shims/ProsperoCDVD.cpp \
@@ -332,7 +341,8 @@ SHIM_SRCS := ./orbis-shims/ProsperoInput.cpp ./orbis-shims/ProsperoCDVD.cpp \
   ./orbis-shims/ProsperoHTTPDownloader.cpp ./orbis-shims/ProsperoHTTPConsole.cpp ./orbis-shims/ProsperoAchievements.cpp \
   ./orbis-shims/ProsperoAchievementBrowser.cpp \
   ./orbis-shims/orbis_gs_shaders.cpp \
-  ./orbis-shims/ps5_framegen.cpp
+  ./orbis-shims/ps5_framegen.cpp \
+  ./orbis-shims/OrbisNfs.cpp
 
 SHIM_ASM := ./orbis-shims/ProsperoTLS.S
 
@@ -446,6 +456,11 @@ $(patsubst $(PCSX2)/%.c,$(OBJDIR)/%.o,$(LIBARCHIVE_CSRCS)): CFLAGS += -DHAVE_CON
 $(OBJDIR)/frontend/fe_texpacks.o: CXXFLAGS += $(LIBARCHIVE_INCLUDES) -Wframe-larger-than=12288
 # vk-285-134: a BIOS taken out of a .zip/.rar/.7z (fe_bios.cpp) reads it with libarchive too.
 $(OBJDIR)/frontend/fe_bios.o: CXXFLAGS += $(LIBARCHIVE_INCLUDES)
+# vk-285-135: libnfs with its config and quietly (not our code to change), and the file that uses it.
+$(patsubst $(PCSX2)/%.c,$(OBJDIR)/%.o,$(NFS_CSRCS)): CFLAGS += -DHAVE_CONFIG_H -DHAVE_NFS4_2 "-D_U_=__attribute__((unused))" \
+  -I$(NFS_DIR) $(NFS_INCLUDES) -I$(NFS_DIR)/include/nfsc -I$(NFS_DIR)/mount -I$(NFS_DIR)/nfs -I$(NFS_DIR)/nfs4 \
+  -I$(NFS_DIR)/portmap -w
+$(OBJDIR)/shim/orbis-shims/OrbisNfs.o: CXXFLAGS += $(NFS_INCLUDES)
 # 2026-10-05: mbedTLS with its config (warnings on: it builds clean), and the client that uses it.
 $(patsubst $(PCSX2)/%.c,$(OBJDIR)/%.o,$(MBEDTLS_CSRCS)): CFLAGS += $(MBEDTLS_FLAGS) -I$(PS5_THIRD)/mbedtls/library
 $(OBJDIR)/frontend/fe_https.o: CXXFLAGS += $(MBEDTLS_FLAGS) -Wframe-larger-than=12288

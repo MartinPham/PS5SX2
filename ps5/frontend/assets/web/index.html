@@ -306,7 +306,7 @@ const combo = (key, label, def, pair) => ({ key: "PS5SX2/" + key, label, type: "
 const GROUPS = [
   { title: "Display", items: [
     { key: "upscale_multiplier", label: "Resolution", type: "seg", def: "1", short: "%",
-      options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"],["8","8x"]],
+      options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"],["8","8x (PS5 Pro)"]],
       hint: "Internal resolution. 6x is about 4K; 8x draws more than the screen shows (about 5K, made smaller to fit): sharpest, and the heaviest on the GPU." },
     { key: "AspectRatio", label: "Aspect ratio", type: "seg", def: "Auto 4:3/3:2", short: "Aspect %",
       options: [["Auto 4:3/3:2","Auto"],["4:3","4:3"],["16:9","16:9"],["Stretch","Stretch"]] },
@@ -440,6 +440,11 @@ const GROUPS = [
     // 2026-10-08: the overlay pictures' folder (PS5SX2/Bezel), read live.
     { key: "PS5SX2/BezelDir", label: "Overlays folder", type: "text", def: "", placeholder: "/mnt/usb0/PS2/overlays",
       hint: "Optional: where the overlay pictures are looked for first (<game serial>.png, default.png), before /data/PCSX2/overlays." },
+    // vk-285-135 (AI-assisted; testers: "nfs mounting"): games on a PC or NAS share (orbis-shims/OrbisNfs.cpp), mounted
+    // when PS5SX2 starts; each share's games are listed like a drive's.
+    { key: "PS5SX2/NfsShares", label: "NFS shares", type: "text", def: "", restart: true, later: "the NFS shares",
+      placeholder: "nfs://192.168.1.10/volume1/PS2",
+      hint: "Games on a PC or NAS shared over NFS: nfs:// addresses separated by ; (the server, then the shared folder or a folder in it). NFS v3 (Windows: WinNFSd or haneWIN; Linux, Synology, QNAP, TrueNAS), else v4. Add ?version=4, ?nfsport=2049&mountport=1058 or ?uid=1000&gid=1000 when the server needs them. Read-only. Mounted when PS5SX2 starts; boot.log says how it went." },
     { key: "PS5SX2/BiosFolder", label: "BIOS folder", type: "text", def: "", restart: true, later: "the BIOS folder",
       placeholder: "/mnt/ext1/PS2/bios",
       hint: "Where to look for the BIOS first. Without it: /data/PCSX2/bios, then /data/PCSX2 and the drives' bios/ and PCSX2/bios/ folders. Read when PS5SX2 starts." },

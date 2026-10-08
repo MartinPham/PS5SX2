@@ -205,9 +205,18 @@ if [[ $ORDER_FILE != none && -f $ORDER_FILE ]]; then
   ORDER_ARGS=(--symbol-ordering-file="$ORDER_FILE" --no-warn-symbol-ordering)
   echo "[link-vk] function order: $(wc -l < "$ORDER_FILE") hot functions first ($ORDER_FILE)"
 fi
+# vk-285-135 (AI-assisted): games on NFS shares. The C library's file calls in orbis-shims/OrbisNfs.wrap go through
+# orbis-shims/OrbisNfs.cpp (__wrap_<name>), which answers /nfs/ paths and its own FILEs and descriptors and passes the
+# rest on (__real_<name>).
+NFS_WRAP=()
+while IFS= read -r name; do
+  [[ -z $name || $name == \#* ]] && continue
+  NFS_WRAP+=("--wrap=$name")
+done < "$here/orbis-shims/OrbisNfs.wrap"
+echo "[link-vk] NFS shares: ${#NFS_WRAP[@]} C library calls wrapped (orbis-shims/OrbisNfs.wrap)"
 pie_link() {
   # shellcheck disable=SC2086
-  "$LLD" -m elf_x86_64 -pie -z max-page-size=0x4000 -mllvm -emulated-tls \
+  "$LLD" -m elf_x86_64 -pie -z max-page-size=0x4000 -mllvm -emulated-tls "${NFS_WRAP[@]}" \
     --hash-style=gnu -T "$NATIVE/tooling/native/ps5-pie.ld" -T "$here/orbis-shims/ehframe.ld" --eh-frame-hdr \
     --version-script "$NATIVE/tooling/native/app-symbols.map" "${ORDER_ARGS[@]}" "$@" -e _start \
     ${LLD_EXTRA:---no-dynamic-linker} \
