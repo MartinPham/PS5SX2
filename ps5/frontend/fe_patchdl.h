@@ -72,6 +72,10 @@ struct OnlinePatchSource
 	const char* tag;      // groups renamed "<name> (<tag>)" ("" leaves them)
 };
 const std::vector<OnlinePatchSource>& OnlinePatchSources();
+// A source's URL for "<serial>_<crc>": its first "%s" replaced by `key`. vk-285-134b: not through snprintf, since the URL
+// isn't a format: Gabominated's holds "%20" ("PCSX2%20Patches"), which the console's snprintf read as a conversion, and
+// every Gabominated request failed ("no connection") while PC builds (glibc prints an unknown conversion as it is) worked.
+std::string OnlinePatchUrl(const OnlinePatchSource& src, const std::string& key);
 
 // PCSX2's game CRC of a boot executable: the XOR of its little-endian 32-bit words (a tail of 1-3 bytes left out).
 uint32_t ElfCrc(const std::vector<uint8_t>& elf);

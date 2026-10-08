@@ -138,6 +138,15 @@ const std::vector<OnlinePatchSource>& OnlinePatchSources()
 	return sources;
 }
 
+std::string OnlinePatchUrl(const OnlinePatchSource& src, const std::string& key)
+{
+	std::string url = src.url;
+	const size_t at = url.find("%s");
+	if (at != std::string::npos)
+		url.replace(at, 2, key);
+	return url;
+}
+
 uint32_t ElfCrc(const std::vector<uint8_t>& elf)
 {
 	uint32_t crc = 0;
@@ -391,8 +400,7 @@ OnlinePatchStatus OnlinePatches::FetchWithCrc(const std::string& serial, uint32_
 	for (const OnlinePatchSource& src : OnlinePatchSources())
 	{
 		SetStatus(serial, OnlinePatchStatus::State::Working, std::string("Asking ") + src.name);
-		char url[512];
-		std::snprintf(url, sizeof(url), src.url, key);
+		const std::string url = OnlinePatchUrl(src, key); // vk-285-134b: not snprintf (see fe_patchdl.h)
 		std::string body;
 		const int status = m_platform.get_text(url, body);
 		if (status == 404)

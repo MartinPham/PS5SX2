@@ -67,6 +67,18 @@ int main(int argc, char** argv)
 		const uint32_t want = 0x464c457fu ^ 0x00000001u ^ 0x40302010u;
 		Check(fe::ElfCrc(elf) == want, "ElfCrc is the XOR of the 32-bit words");
 	}
+	// vk-285-134b: the URL is made by replacing "%s", never by printf: a "%20" (or "%20s") in a source's URL stays as it is.
+	{
+		const fe::OnlinePatchSource odd = {"odd", "https://example.com/a%20s%20P/%s.pnach", false, "", ""};
+		Check(fe::OnlinePatchUrl(odd, "SLUS-20265_79646C72") == "https://example.com/a%20s%20P/SLUS-20265_79646C72.pnach",
+			"a source's URL keeps its %20s and gets the key in place of its %s");
+		bool gab_ok = false;
+		for (const fe::OnlinePatchSource& src : fe::OnlinePatchSources())
+			if (std::string(src.name) == "Gabominated")
+				gab_ok = fe::OnlinePatchUrl(src, "SLUS-20265_79646C72") ==
+				         "https://raw.githubusercontent.com/Gabominated/PCSX2/main/PCSX2%20Patches/SLUS-20265_79646C72.pnach";
+		Check(gab_ok, "Gabominated's URL is its folder \"PCSX2 Patches\" with the key");
+	}
 	Check(fe::LooksLikePnach("gametitle=X\n[60 FPS]\npatch=1,EE,00100000,word,00000000\n"), "a pnach text is one");
 	Check(!fe::LooksLikePnach("<!DOCTYPE html><html>404</html>"), "an HTML page is not");
 	Check(!fe::LooksLikePnach(""), "nothing is not");
