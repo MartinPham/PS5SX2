@@ -2223,19 +2223,33 @@ void App::UpdatePicker(double dt, const Input& in)
 			text.pop_back();
 		while (!text.empty() && text.front() == ' ')
 			text.erase(0, 1);
+		// vk-285-138 (AI-assisted; swordpdf: "i cant edit my nfs path"): Cross on a listed share opens the keyboard with it, and
+		// what comes back takes its place.
+		const std::string editing = p.editing;
+		p.editing.clear();
 		if (r > 0 && text.size() > 6 && StartsWithNoCase(text, "nfs://") && text.find(';') == std::string::npos)
 		{
 			std::vector<std::string> list = SplitFolderList(m_sheet.OwnValue(kNfsSharesKey));
-			if (std::find(list.begin(), list.end(), text) == list.end())
+			const auto old = std::find(list.begin(), list.end(), editing);
+			if (!editing.empty() && old != list.end())
+			{
+				*old = text;
+				list.erase(std::unique(list.begin(), list.end()), list.end());
+			}
+			else if (std::find(list.begin(), list.end(), text) == list.end())
 				list.push_back(text);
-			if (m_sheet.SetOwn(kNfsSharesKey, JoinFolderList(list), "NFS share added: " + text))
-				status("Added " + text + ": restart PS5SX2 to mount it");
+			const bool changed = text != editing;
+			if (changed && m_sheet.SetOwn(kNfsSharesKey, JoinFolderList(list), (editing.empty() ? "NFS share added: " : "NFS share changed: ") + text))
+				status((editing.empty() ? "Added " : "Changed to ") + text + ": restart PS5SX2 to mount it");
+			else if (!changed)
+				status("Unchanged");
 			PickerList("", text);
 			Sound(Sfx::Move, 0.3f);
 		}
 		else
 		{
-			status(r > 0 && !text.empty() && text != "nfs://" ? "Not an nfs:// address: nothing added" : "Nothing added");
+			status(r > 0 && !text.empty() && text != "nfs://" ? std::string("Not an nfs:// address: ") + (editing.empty() ? "nothing added" : "the share stays as it was")
+			                                                   : std::string(editing.empty() ? "Nothing added" : "Unchanged"));
 			Sound(Sfx::Edge, 0.3f);
 		}
 		return;
@@ -2324,8 +2338,11 @@ void App::UpdatePicker(double dt, const Input& in)
 				p.open = false;
 				Sound(Sfx::Move, 0.3f);
 				break;
+			case T::Share: // vk-285-138: change it on the keyboard
 			case T::Add:
-				if (m_cfg.text_entry.open && m_cfg.text_entry.open("NFS share: nfs://server/shared folder", item.value, false, 255))
+				p.editing = item.type == T::Share ? item.path : std::string();
+				if (m_cfg.text_entry.open && m_cfg.text_entry.open("NFS share: nfs://server/shared folder", item.type == T::Share ? item.path : item.value,
+						false, 255))
 					p.typing = true;
 				else
 				{
@@ -2334,7 +2351,6 @@ void App::UpdatePicker(double dt, const Input& in)
 				}
 				break;
 			case T::Listed:
-			case T::Share:
 				status("Triangle removes it");
 				Sound(Sfx::Edge, 0.3f);
 				break;
@@ -2430,7 +2446,8 @@ void App::BuildPicker(std::vector<UiVertex>& ui, float x, float sw, float y, flo
 		help = p.kind == K::BiosFolder ? "Cross: look for the BIOS here first. Circle: back."
 		                               : "Cross: list the games in this folder (and in the folders in it). Circle: back.";
 	else if (it && (it->type == T::Listed || it->type == T::Share))
-		help = std::string("Triangle: remove it") + (it->type == T::Share ? " from the shares." : " from the game folders.") + " Circle: back to the sheet.";
+		help = it->type == T::Share ? std::string("Cross: change it on the PS5's keyboard. Triangle: remove it from the shares. Circle: back to the sheet.")
+		                            : std::string("Triangle: remove it from the game folders. Circle: back to the sheet.");
 	else if (it && it->type == T::Add)
 		help = "Cross: type a share's address on the PS5's keyboard (nfs://<server>/<shared folder>). Circle: back to the sheet.";
 	else

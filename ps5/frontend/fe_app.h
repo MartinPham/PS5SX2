@@ -158,6 +158,7 @@ private:
 		int row = 0;
 		float scroll = 0, scroll_target = 0;
 		bool typing = false; // the PS5's keyboard is open for a share's address
+		std::string editing;  // vk-285-138: the share being changed (empty: a new one)
 		int held = 0;
 		double held_for = 0, next_repeat = 0;
 	};
