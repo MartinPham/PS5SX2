@@ -1063,6 +1063,11 @@ static void OrbisPerfMinute(unsigned fps, float speed, float ee, float gs, float
 
 #ifdef ORBIS_VULKAN
 void OrbisVkPresentBlend(GSTexture* tex, const GSVector4& sRect, const GSVector4& dRect); // GSDeviceVK.cpp
+// 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp, "frame generation").
+extern bool g_orbis_fg_wanted;
+u32 OrbisVkFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader, float shader_time,
+	Filter filter);
+void OrbisVkFrameGenDraw();
 
 // Test build 1: the TESTING watermark in the middle of the game's picture, faint (its opacity is in
 // the image), sized for the display's height. The texture is made once per GS device.
@@ -1180,14 +1185,21 @@ static void OrbisDrawQrPanel()
 	g_gs_device->PresentRect(s_tex, GSVector4(0.0f, 0.0f, 1.0f, 1.0f), nullptr, GSVector4(x0, y0, x1, y1), PresentShader::COPY, 0.0f, Nearest);
 }
 
-static void OrbisGLOSD()
+// 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp): `generated` draws the box over a generated frame, the same as over
+// the game's last one, without counting it (the box's FPS is the game's; "FG" says frames are generated between them).
+#ifdef ORBIS_VULKAN
+extern std::atomic<bool> g_orbis_fg_active; // GSDeviceVK.cpp
+#endif
+
+static void OrbisGLOSD(bool generated = false)
 {
 	if (!s_orbis_gl || !g_gs_device)
 		return;
 	static u64 s_count = 0;
 	static auto s_t0 = std::chrono::steady_clock::now();
 	static unsigned s_fps = 0;
-	s_count++;
+	if (!generated)
+		s_count++;
 	const auto now = std::chrono::steady_clock::now();
 	const double dt = std::chrono::duration<double>(now - s_t0).count();
 	if (dt >= 1.0)
@@ -1229,7 +1241,8 @@ static void OrbisGLOSD()
 	static u64 s_q_count = 0;
 	static auto s_q_t0 = now;
 	static bool s_hist_dirty = false;
-	s_q_count++;
+	if (!generated)
+		s_q_count++;
 	{
 		const double qdt = std::chrono::duration<double>(now - s_q_t0).count();
 		if (qdt >= 0.25)
@@ -1256,23 +1269,30 @@ static void OrbisGLOSD()
 
 	char text[48] = {};
 	bool have_text = true;
+#ifdef ORBIS_VULKAN
+	const char* const fg_mark = g_orbis_fg_active.load(std::memory_order_relaxed) ? " FG" : "";
+#else
+	const char* const fg_mark = "";
+#endif
 	if (g_orbis_osd_text_frames.load(std::memory_order_acquire) > 0) // eerec-282
 	{
-		g_orbis_osd_text_frames.fetch_sub(1, std::memory_order_relaxed);
+		if (!generated)
+			g_orbis_osd_text_frames.fetch_sub(1, std::memory_order_relaxed);
 		snprintf(text, sizeof(text), "%s", g_orbis_osd_text);
 	}
 	else if (s_orbis_label_frames > 0)
 	{
-		s_orbis_label_frames--;
+		if (!generated)
+			s_orbis_label_frames--;
 		snprintf(text, sizeof(text), "%s", s_orbis_modes[s_orbis_mode].name);
 	}
 	else if (show_fps && show_loads) // eerec-280; vk-285-72: the [load] line's loads
-		snprintf(text, sizeof(text), "%u FPS EE%u GS%u VU%u", s_fps,
+		snprintf(text, sizeof(text), "%u FPS%s EE%u GS%u VU%u", s_fps, fg_mark,
 			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_ee : PerformanceMetrics::GetCPUThreadUsage()) + 0.5),
 			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_gs : PerformanceMetrics::GetGSThreadUsage()) + 0.5f),
 			static_cast<unsigned>((s_orbis_load_valid ? s_orbis_load_vu : PerformanceMetrics::GetVUThreadUsage()) + 0.5f));
 	else if (show_fps)
-		snprintf(text, sizeof(text), "FPS %u", s_fps);
+		snprintf(text, sizeof(text), "FPS %u%s", s_fps, fg_mark);
 	else
 		have_text = false;
 	if (!have_text && !graph)
@@ -2413,6 +2433,29 @@ void GSRenderer::VSync(u32 field, bool registers_written, bool idle_frame)
 		}
 
 		ORBIS_VS_MARK(ORBIS_VS_PREP);
+#ifdef ORBIS_VULKAN
+		// 2026-10-08 (AI-assisted): frame generation (PS5SX2/FrameGeneration; GSDeviceVK.cpp): the frame between the last one and
+		// this one, presented first (as many times as the pacing asks), PS5SX2's overlays over it as over the game's own frames.
+		// Needs proper testing.
+		if (current && !blank_frame && g_orbis_fg_wanted)
+		{
+			const float fg_time = static_cast<float>(
+				Common::Timer::ConvertValueToSeconds(Common::Timer::GetCurrentValue() - m_shader_time_start));
+			const u32 generated_presents = OrbisVkFrameGenRecord(current, src_uv, draw_rect, s_tv_shader_indices[GSConfig.TVShader],
+				fg_time, BilnIf(GSConfig.LinearPresent != GSPostBilinearMode::Off));
+
+			for (u32 i = 0; i < generated_presents; i++)
+			{
+				if (!BeginPresentFrame(false))
+					break;
+
+				OrbisVkFrameGenDraw();
+				OrbisWatermark();
+				OrbisGLOSD(true);
+				EndPresentFrame();
+			}
+		}
+#endif
 		const bool began = BeginPresentFrame(false);
 		ORBIS_VS_MARK(ORBIS_VS_BEGIN);
 		if (began)

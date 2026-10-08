@@ -1097,6 +1097,15 @@ static bool g_vu_interp = false;
 static bool g_ee_interp = false;
 static bool g_iop_interp = false;
 extern "C" int sceSystemServiceLoadExec(const char* path, const char* argv[]);
+// 2026-10-08 (AI-assisted): frame generation's 120 Hz output outlives the process that asked for it (PS5_Vulkan R51), so
+// every way out of the process that leaves the GS's swapchain open (the menu, a restart, the exit, a new build) puts the
+// default output back first (the driver's ps5vk_output_restore_default, vk-285-131; nothing without it or at 60 Hz).
+extern "C" bool ps5vk_output_restore_default(void) __attribute__((weak));
+static void orbis_output_default()
+{
+  if (ps5vk_output_restore_default)
+    ps5vk_output_restore_default();
+}
 
 // etaHEN non-whitelist jailbreak: send JAILBREAK_CMD to the legacy CMD server
 // (127.0.0.1:9028). Grants the process full ucred/caps (JIT, direct memory...).
@@ -1391,6 +1400,20 @@ static bool orbis_mtvu_after_gamedb(bool from_settings)
   return from_settings;
 }
 
+#ifdef ORBIS_VULKAN
+// 2026-10-08 (AI-assisted): frame generation's latency hold (see the boot's "frame generation" block): the game runs 0.08% slow so that
+// two presents a frame at 120 Hz never fill the swapchain's queue. Applied to the settings layer at the boot and at each live reload
+// (which rebuilds the layer from the files).
+extern bool g_orbis_fg_wanted;
+static void orbis_fg_hold(MemorySettingsInterface& si)
+{
+  if (!g_orbis_fg_wanted)
+    return;
+  const float scalar = si.GetFloatValue("Framerate", "NominalScalar", 1.0f);
+  si.SetFloatValue("Framerate", "NominalScalar", scalar * 0.9992f);
+}
+#endif
+
 void orbis_reload_gs_ini_cpu();
 // vk-285-118 (AI-assisted): GPU readbacks to Don't wait for the rest of the game, asked for by GSRenderer.cpp's
 // OrbisReadbackAutoSecond (older firmware's readback stall). Not when gs.ini or the game's file sets HWDownloadMode: that
@@ -1428,6 +1451,9 @@ void orbis_reload_gs_ini_cpu()
 {
   MemorySettingsInterface trial = s_base_pre_gsini;
   orbis_apply_gs_ini(trial);
+#ifdef ORBIS_VULKAN
+  orbis_fg_hold(trial); // 2026-10-08
+#endif
   orbis_usb_kbm_for_mode(trial); // vk-285-113
   Pcsx2Config next;
   {
@@ -1715,6 +1741,7 @@ void OrbisBackToMenuCpu()
 // "Kill for LoadExec", "Terminating pid"). It works asynchronously: wait for it, and _exit() only if it never comes.
 [[noreturn]] void OrbisExitApp(int status)
 {
+  orbis_output_default();
   orbis_log_drain();
   fflush(stdout);
   fflush(stderr);
@@ -1746,6 +1773,7 @@ static void orbis_restart_to_menu()
   if (stat(path, &st) != 0)
     path = "/app0/eboot.bin";
   printf("[menu] the game didn't start: re-executing %s\n", path);
+  orbis_output_default();
   orbis_log_drain();
   fflush(stdout);
   fflush(stderr);
@@ -1778,6 +1806,7 @@ static void orbis_back_to_menu()
   if (stat(path, &st) != 0)
     path = "/app0/eboot.bin";
   printf("[menu] re-executing %s\n", path);
+  orbis_output_default();
   fflush(stdout);
   fflush(stderr);
   const int rc = sceSystemServiceLoadExec(path, nullptr);
@@ -2315,6 +2344,7 @@ int main()
         sys_notify("PS5SX2: new build, restarting");
         ps5::debug::set_line(2, "NEW BUILD - RESTARTING");
         sleep(1);
+        orbis_output_default();
         int rc = sceSystemServiceLoadExec(path, nullptr);
         printf("[boot] LoadExec failed rc=%d, staying on current build\n", rc);
         fflush(stdout);
@@ -2605,6 +2635,21 @@ int main()
   orbis_usb_kbm_for_mode(s_base_si); // vk-285-113
   orbis_vu1_speed_from(s_base_si); // vk-285-75
   orbis_ps5opts_from(s_base_si); // vk-285-113
+#ifdef ORBIS_VULKAN
+  {
+    // 2026-10-08 (AI-assisted): PS5SX2/FrameGeneration, per game (or in gs.ini): a frame generated between two of the game's and
+    // presented before the second (GSDeviceVK.cpp, "frame generation"), with the TV in its 120 Hz mode for the game (VKSwapChain.cpp
+    // picks the mode when the swapchain is made, so it is read here, before the GS opens). Needs proper testing.
+    g_orbis_fg_wanted = s_base_si.GetBoolValue("PS5SX2", "FrameGeneration", false) && !g_sw_renderer;
+    // The latency hold (RPCS3-PS5 m74): at 120 Hz each game frame brings two presents, which fill every refresh; a game a hair
+    // faster than half the display's rate would fill the swapchain's queue and show every frame later from then on. The game
+    // runs 0.08% slow instead (59.89 fps for NTSC's 59.94): the queue stays empty, and once in a while a refresh repeats.
+    orbis_fg_hold(s_base_si);
+    printf("[boot] frame generation: %s\n", g_orbis_fg_wanted ? "on (PS5SX2/FrameGeneration; the display asked for at 120 Hz)" :
+      "off");
+    fflush(stdout);
+  }
+#endif
   {
     // vk-285-110: the PS2 system language games are told (pcsx2/CDVD/CDVD.cpp): the PS5SX2/GameLanguage
     // setting (0 Japanese .. 7 Portuguese, from gs.ini or the game's settings file), else the PS5's own

@@ -75,11 +75,15 @@ static VkSurfaceKHR CreateOrbisDisplaySurface(VkInstance instance, VkPhysicalDev
 
 	// The first display with a mode; the largest mode it offers (ps5vk has one), and of equally large ones the one nearest
 	// 60 Hz (vk-285-115: RADV can list 119.88 Hz first, when the title asks VideoOut for high frame rates).
+	// 2026-10-08 (AI-assisted): with frame generation on for the game (PS5SX2/FrameGeneration), the one nearest 120 Hz: a
+	// 60 fps game is shown at 120 with a generated frame between two of its own (GSDeviceVK.cpp, "frame generation").
+	extern bool g_orbis_fg_wanted;
+	const s64 wanted_mhz = g_orbis_fg_wanted ? 120000 : 60000;
 	VkDisplayKHR chosen_display = VK_NULL_HANDLE;
 	VkDisplayModePropertiesKHR chosen_mode = {};
-	const auto off_60hz = [](const VkDisplayModePropertiesKHR& m) {
+	const auto off_60hz = [wanted_mhz](const VkDisplayModePropertiesKHR& m) {
 		const s64 mhz = static_cast<s64>(m.parameters.refreshRate);
-		return mhz > 60000 ? mhz - 60000 : 60000 - mhz;
+		return mhz > wanted_mhz ? mhz - wanted_mhz : wanted_mhz - mhz;
 	};
 	for (const VkDisplayPropertiesKHR& display : displays)
 	{

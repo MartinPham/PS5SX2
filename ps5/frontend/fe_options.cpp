@@ -252,14 +252,12 @@ const std::vector<OptionGroup>& OptionGroups()
 				Toggle("EmuCore/EnableWideScreenPatches", "Widescreen patches", "false", "Widescreen %",
 					"Uses the game's 16:9 patch when there is one."),
 				Seg("TVShader", "Display filter", "0", "%", {{"6", "FSR"}, {"7", "FSR soft"}, {"0", "Classic"}, {"5", "CRT"}}),
-			}},
-		// vk-285-115: PCSX2's crop (EmuCore/GS/CropLeft..CropBottom, PS2 pixels), as on the page.
-		{"Crop",
-			{
-				Seg("CropLeft", "Crop left", "0", "Crop left %", CropChoices(), kCropHint),
-				Seg("CropTop", "Crop top", "0", "Crop top %", CropChoices(), kCropHint),
-				Seg("CropRight", "Crop right", "0", "Crop right %", CropChoices(), kCropHint),
-				Seg("CropBottom", "Crop bottom", "0", "Crop bottom %", CropChoices(), kCropHint),
+				// 2026-10-08 (AI-assisted): frame generation (GSDeviceVK.cpp), read when the game starts (main-boot.cpp).
+				Toggle("PS5SX2/FrameGeneration", "Frame generation", "false", "Frame gen %",
+					"Shows a frame made between two of the game's: a 60 fps game at 120 on a TV that takes 120 Hz (the TV switches to "
+					"120 Hz for the game), a 30 fps game at 60. A little more input lag, and small smears at the edges of fast movement. "
+					"Experimental. Takes effect when the game starts.",
+					true),
 			}},
 		{"Graphics",
 			{
@@ -308,6 +306,15 @@ const std::vector<OptionGroup>& OptionGroups()
 					"The box in the top right corner. Load is how busy the EE, GS and VU threads are."),
 				Toggle("PS5SX2/FpsGraph", "FPS graph", "false", "FPS graph %",
 					"A blue graph of the last minute's frame rate in the top right corner. It shows with the info box off too."),
+			}},
+		// vk-285-115: PCSX2's crop (EmuCore/GS/CropLeft..CropBottom, PS2 pixels), as on the page. 2026-10-08: the last group of the
+		// Settings tab, as testers asked (it is set once for a game and then left).
+		{"Crop",
+			{
+				Seg("CropLeft", "Crop left", "0", "Crop left %", CropChoices(), kCropHint),
+				Seg("CropTop", "Crop top", "0", "Crop top %", CropChoices(), kCropHint),
+				Seg("CropRight", "Crop right", "0", "Crop right %", CropChoices(), kCropHint),
+				Seg("CropBottom", "Crop bottom", "0", "Crop bottom %", CropChoices(), kCropHint),
 			}},
 		// vk-285-116 (AI-assisted): the Controls tab (R2 on the sheet, as the page's Controls tab). The remapping, (vk-285-117) the
 		// save and load combos: main-boot.cpp orbis_ps5opts_from, orbis-shims/OrbisPadMap.h.

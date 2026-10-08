@@ -31,6 +31,8 @@
 #include <sstream>
 #ifdef ORBIS_VULKAN
 #include <unistd.h> // vk-285-14: fsync, _exit (GPU-hang forensics)
+#include <chrono> // 2026-10-08: frame generation's pacing
+#include <string>
 #include "OrbisPaths.h" // vk-285-33 (the port's include-orbis)
 #include "OrbisDriver.h" // vk-285-115: ps5vk or RADV (the same objects link with either)
 #include "OrbisExit.h" // vk-285-115: the app ends through the system (_exit() is a SIGSYS on the console)
@@ -42,6 +44,9 @@
 // PS5 port (vk-285-104): this file's printf/fflush(stdout) go to the deferred log (OrbisDeferredLog.h); the
 // ticker thread writes them out, so the GS thread never waits on /data or on stdout's lock.
 #include "OrbisDeferredLog.h"
+#ifdef ORBIS_VULKAN
+#include "ps5/coreorbis/orbis-shims/ps5_framegen.h" // 2026-10-08: frame generation
+#endif
 #define printf OrbisDeferredPrintf
 #define fflush OrbisDeferredFlush
 #ifdef ORBIS_VULKAN
@@ -3483,6 +3488,9 @@ void GSDeviceVK::Destroy()
 		WaitForGPUIdle();
 	}
 
+#ifdef ORBIS_VULKAN
+	OrbisFrameGenRelease(); // its images and pipelines before the device (2026-10-08)
+#endif
 	m_swap_chain.reset();
 
 	if (m_device != VK_NULL_HANDLE)
@@ -4384,6 +4392,288 @@ void OrbisVkPresentBlend(GSTexture* tex, const GSVector4& sRect, const GSVector4
 {
 	if (GSDeviceVK* dev = GSDeviceVK::GetInstance())
 		dev->OrbisPresentBlend(tex, sRect, dRect);
+}
+
+// ---- Frame generation (2026-10-08, AI-assisted; needs proper testing on the console) -------------------------------------------
+// PS5SX2/FrameGeneration, per game: the frame between two of the game's, made by ps5/coreorbis/orbis-shims/ps5_framegen (AMD FSR3's
+// optical flow and RPCS3-PS5's interpolation, from Swordpdf's RPCS3-PS5 / ps5-framegen), presented before the second one. The game's
+// frame is drawn into the interpolator's frame by the same present pipeline that draws it into the swapchain (the TV shader or the
+// FSR present, the scaling, the black borders), so a generated frame looks like the game's own; PS5SX2's overlays (the FPS box,
+// the watermark, the QR panel) are drawn over both. The TV is in its 120 Hz mode where the console allows it (VKSwapChain.cpp picks
+// the mode, the driver configures VideoOut): a 60 fps game is shown at 120, a 30 fps one gets its generated frame twice. At 60 Hz
+// only a game at 30 fps or less gets frames made. File statics, not members: GSDeviceVK's layout stays as it was.
+bool g_orbis_fg_wanted = false; // main-boot.cpp sets it from PS5SX2/FrameGeneration before the GS opens
+std::atomic<bool> g_orbis_fg_active{false}; // frames are being generated (the FPS box says "FG")
+
+// The driver's measured refresh of the output its swapchain presents to (ps5vk's high-frame-rate output, 2026-10-08); a driver
+// without it presents at 59.94 Hz.
+extern "C" uint32_t ps5vk_output_refresh_millihertz(void) __attribute__((weak));
+
+namespace
+{
+	struct OrbisFrameGenState
+	{
+		std::unique_ptr<ps5::framegen::interpolator> fg;
+		std::unique_ptr<GSTextureVK> frames[2]; // the interpolator's two frame images (this frame's and the previous one alternate)
+		VkImage frame_images[2] = {};
+		std::unique_ptr<GSTextureVK> output;    // the generated frame
+		bool failed = false;     // it could not start: not tried again in this game
+		bool prepared = false;   // the wrappers know the images are the interpolator's (GENERAL)
+		bool reset_next = true;
+		bool have_output = false;
+		u32 repeats = 1;         // presents of the generated frame before the game's
+		double hz = 59.94;
+		double interval_ms = 0.0; // the game's frames' interval, a running mean
+		std::chrono::steady_clock::time_point last_frame{};
+		std::chrono::steady_clock::time_point stat_start{};
+		u64 stat_frames = 0, stat_made = 0, stat_presents = 0;
+	};
+
+	OrbisFrameGenState s_orbis_fg;
+
+	double OrbisFrameGenDisplayHz()
+	{
+		if (ps5vk_output_refresh_millihertz)
+		{
+			const uint32_t mhz = ps5vk_output_refresh_millihertz();
+			if (mhz >= 20000 && mhz <= 250000)
+				return mhz / 1000.0;
+		}
+		return 59.94;
+	}
+}
+
+void GSDeviceVK::OrbisFrameGenRelease()
+{
+	OrbisFrameGenState& s = s_orbis_fg;
+
+	if (!s.fg)
+		return;
+
+	EndRenderPass();
+	if (GetCurrentCommandBuffer() != VK_NULL_HANDLE)
+	{
+		ExecuteCommandBuffer(false);
+		WaitForGPUIdle();
+	}
+
+	for (auto& t : s.frames)
+	{
+		if (t)
+			t->Destroy(false);
+		t.reset();
+	}
+	if (s.output)
+		s.output->Destroy(false);
+	s.output.reset();
+
+	printf("[fg] released: %llu game frames, %llu generated\n", static_cast<unsigned long long>(s.fg->frames()),
+		static_cast<unsigned long long>(s.fg->interpolated()));
+	fflush(stdout);
+	s.fg->destroy();
+	s.fg.reset();
+	s.prepared = false;
+	s.reset_next = true;
+	g_orbis_fg_active.store(false, std::memory_order_relaxed);
+}
+
+u32 GSDeviceVK::OrbisFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader,
+	float shader_time, Filter filter)
+{
+	OrbisFrameGenState& s = s_orbis_fg;
+	s.have_output = false;
+
+	if (!g_orbis_fg_wanted || s.failed || !m_swap_chain || !current)
+		return 0;
+
+	const u32 w = static_cast<u32>(GetWindowWidth());
+	const u32 h = static_cast<u32>(GetWindowHeight());
+	const VkFormat format = m_swap_chain->GetTextureFormat();
+
+	if (!s.fg || s.fg->width() != w || s.fg->height() != h)
+	{
+		OrbisFrameGenRelease();
+		const auto t0 = std::chrono::steady_clock::now();
+		std::string error;
+		s.fg = std::make_unique<ps5::framegen::interpolator>();
+
+		if (!s.fg->create(m_physical_device, m_device, w, h, error, format))
+		{
+			printf("[fg] frame generation could not start at %ux%u: %s; it stays off in this game\n", w, h, error.c_str());
+			fflush(stdout);
+			s.fg.reset();
+			s.failed = true;
+			return 0;
+		}
+
+		// The interpolator's images, as textures PCSX2's present can draw into and read (they stay the interpolator's).
+		s.frame_images[0] = s.fg->frame_image();
+		s.frame_images[1] = s.fg->previous_image();
+
+		for (int i = 0; i < 2; i++)
+		{
+			s.frames[i] = GSTextureVK::Adopt(s.frame_images[i], GSTexture::RenderTarget, GSTexture::Format::Color, static_cast<int>(w),
+				static_cast<int>(h), 1, format);
+		}
+		s.output = GSTextureVK::Adopt(s.fg->output_image(), GSTexture::Texture, GSTexture::Format::Color, static_cast<int>(w),
+			static_cast<int>(h), 1, ps5::framegen::interpolator::k_format);
+
+		if (!s.frames[0] || !s.frames[1] || !s.output)
+		{
+			printf("[fg] the frame images could not be viewed; frame generation stays off in this game\n");
+			fflush(stdout);
+			OrbisFrameGenRelease();
+			s.failed = true;
+			return 0;
+		}
+
+		s.hz = OrbisFrameGenDisplayHz();
+		s.prepared = false;
+		s.reset_next = true;
+		s.interval_ms = 0.0;
+		s.last_frame = {};
+		s.stat_start = std::chrono::steady_clock::now();
+		s.stat_frames = s.stat_made = s.stat_presents = 0;
+		printf("[fg] ready for %ux%u in %.0f ms; the display at %.2f Hz%s\n", w, h,
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(), s.hz,
+			s.hz > 90.0 ? " (60 fps games are shown at 120)" : " (60 Hz: only games at 30 fps or less get frames made)");
+		fflush(stdout);
+	}
+
+	ps5::framegen::interpolator& fg = *s.fg;
+	VkCommandBuffer cmd = GetCurrentCommandBuffer();
+	EndRenderPass();
+
+	fg.prepare(cmd);
+
+	if (!s.prepared)
+	{
+		// prepare() put the images in GENERAL the first time: what the wrappers are told.
+		for (auto& t : s.frames)
+			t->OverrideImageLayout(GSTextureVK::Layout::ComputeReadWriteImage);
+		s.output->OverrideImageLayout(GSTextureVK::Layout::ComputeReadWriteImage);
+		s.prepared = true;
+	}
+
+	// The last frame's presents read the generated frame: back to the interpolator.
+	s.output->TransitionToLayout(cmd, GSTextureVK::Layout::ComputeReadWriteImage);
+
+	GSTextureVK* const target = fg.frame_image() == s.frame_images[0] ? s.frames[0].get() : s.frames[1].get();
+
+	// This frame as the present draws it into the swapchain: a pass of the swapchain's format cleared to black, and the present
+	// pipeline over the same rectangle (PresentRect with no target draws into the pass that is open, as between BeginPresent and
+	// EndPresent).
+	{
+		static_cast<GSTextureVK*>(current)->TransitionToLayout(cmd, GSTextureVK::Layout::ShaderReadOnly);
+		target->TransitionToLayout(cmd, GSTextureVK::Layout::ColorAttachment);
+		const VkFramebuffer fb = target->GetFramebuffer(false);
+
+		if (fb == VK_NULL_HANDLE)
+		{
+			printf("[fg] no framebuffer for the frame image; frame generation stays off in this game\n");
+			fflush(stdout);
+			s.failed = true;
+			return 0;
+		}
+
+		const VkRenderPassBeginInfo rp = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO, nullptr,
+			GetRenderPass(format, VK_FORMAT_UNDEFINED, VK_ATTACHMENT_LOAD_OP_CLEAR, VK_ATTACHMENT_STORE_OP_STORE), fb, {{0, 0}, {w, h}}, 1u,
+			&s_present_clear_color};
+		vkCmdBeginRenderPass(cmd, &rp, VK_SUBPASS_CONTENTS_INLINE);
+		const VkViewport vp{0.0f, 0.0f, static_cast<float>(w), static_cast<float>(h), 0.0f, 1.0f};
+		const VkRect2D scissor{{0, 0}, {w, h}};
+		vkCmdSetViewport(cmd, 0, 1, &vp);
+		vkCmdSetScissor(cmd, 0, 1, &scissor);
+		PresentRect(current, src_uv, nullptr, draw_rect, shader, shader_time, filter);
+		vkCmdEndRenderPass(cmd);
+		target->TransitionToLayout(cmd, GSTextureVK::Layout::ComputeReadWriteImage);
+		InvalidateCachedState(); // the pass and the state were set by hand
+	}
+
+	// The pacing (RPCS3-PS5 m73b): the game's frame interval in refreshes; the generated frame takes about half of it, once at 60 fps
+	// on a 120 Hz display, twice at 30, three times at 20. At 60 Hz only a game at 30 fps or less gets one.
+	const auto now = std::chrono::steady_clock::now();
+
+	if (s.last_frame != std::chrono::steady_clock::time_point{})
+	{
+		const double dt = std::chrono::duration<double, std::milli>(now - s.last_frame).count();
+
+		if (dt > 4.0 && dt < 250.0)
+			s.interval_ms = s.interval_ms > 0.0 ? s.interval_ms * 0.85 + dt * 0.15 : dt;
+		else if (dt >= 250.0)
+			s.reset_next = true; // a pause, a load: the last frame is no neighbour of this one
+	}
+
+	s.last_frame = now;
+	s.hz = OrbisFrameGenDisplayHz(); // the driver's, each frame: the output goes back to 60 Hz before the process ends
+	const double refreshes = s.interval_ms > 0.0 ? s.interval_ms * s.hz / 1000.0 : (s.hz > 90.0 ? 2.0 : 1.0);
+	const double half = refreshes / 2.0;
+
+	while (s.repeats < 3 && half >= s.repeats + 0.9)
+		s.repeats++;
+	while (s.repeats > 1 && half < s.repeats - 0.2)
+		s.repeats--;
+
+	const bool fits = refreshes >= 1.6; // a frame shown for less than two refreshes leaves no room for another
+	fg.set_generated(1);
+	const bool made = fg.record(cmd, s.reset_next);
+	s.reset_next = false;
+
+	if (made)
+	{
+		s.output->OverrideImageLayout(GSTextureVK::Layout::ComputeReadWriteImage); // record() wrote it in GENERAL
+		s.output->TransitionToLayout(cmd, GSTextureVK::Layout::ShaderReadOnly);  // read in the present pass, which can't transition
+		s.have_output = fits;
+	}
+
+	fg.advance();
+
+	// A status line every 10 s.
+	s.stat_frames++;
+	s.stat_made += (made && fits) ? 1 : 0;
+	s.stat_presents += (made && fits) ? s.repeats : 0;
+
+	if (const double secs = std::chrono::duration<double>(now - s.stat_start).count(); secs >= 10.0)
+	{
+		double gpu_ms = 0.0, gpu_max = 0.0, flow_ms = 0.0;
+		u32 timed = 0;
+		const bool have_gpu = fg.take_gpu_time(gpu_ms, gpu_max, timed, flow_ms);
+		printf("[fg] %.1f game fps, %.1f generated frames a second, %u present(s) each, display %.2f Hz%s\n", s.stat_frames / secs,
+			s.stat_made / secs, s.repeats, s.hz,
+			have_gpu ? fmt::format("; GPU {:.2f} ms a frame ({:.2f} the optical flow), most {:.2f}", gpu_ms, flow_ms, gpu_max).c_str() : "");
+		fflush(stdout);
+		s.stat_start = now;
+		s.stat_frames = s.stat_made = s.stat_presents = 0;
+	}
+
+	g_orbis_fg_active.store(s.have_output, std::memory_order_relaxed);
+	return s.have_output ? s.repeats : 0;
+}
+
+void GSDeviceVK::OrbisFrameGenDraw()
+{
+	OrbisFrameGenState& s = s_orbis_fg;
+
+	if (!s.have_output || !s.output)
+		return;
+
+	const float w = static_cast<float>(GetWindowWidth());
+	const float h = static_cast<float>(GetWindowHeight());
+	PresentRect(s.output.get(), GSVector4(0.0f, 0.0f, 1.0f, 1.0f), nullptr, GSVector4(0.0f, 0.0f, w, h), PresentShader::COPY, 0.0f, Nearest);
+}
+
+// For GSRenderer.cpp, which doesn't include this header.
+u32 OrbisVkFrameGenRecord(GSTexture* current, const GSVector4& src_uv, const GSVector4& draw_rect, PresentShader shader, float shader_time,
+	Filter filter)
+{
+	GSDeviceVK* const dev = GSDeviceVK::GetInstance();
+	return dev ? dev->OrbisFrameGenRecord(current, src_uv, draw_rect, shader, shader_time, filter) : 0;
+}
+
+void OrbisVkFrameGenDraw()
+{
+	if (GSDeviceVK* const dev = GSDeviceVK::GetInstance())
+		dev->OrbisFrameGenDraw();
 }
 #endif
 

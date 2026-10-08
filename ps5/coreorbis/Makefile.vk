@@ -14,6 +14,9 @@
 # come from PS5SX2_DEPS (see ps5/README.md) unless set one by one.
 
 VK_MAKEFILE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+# vk-285-131: 1.9's fe_https.o rule (its roots file) came before "all:" and became the default goal, so a bare
+# `make -f Makefile.vk -j2` built that one object and link-vk.sh compiled the rest one at a time.
+.DEFAULT_GOAL := all
 PCSX2           ?= $(abspath $(VK_MAKEFILE_DIR)../..)
 RYML            ?= $(PS5SX2_DEPS)/ryml
 SHADERC_INCLUDE ?= $(PS5SX2_DEPS)/shaderc/libshaderc/include
@@ -328,7 +331,8 @@ SHIM_SRCS := ./orbis-shims/ProsperoInput.cpp ./orbis-shims/ProsperoCDVD.cpp \
   ./orbis-shims/ProsperoKbdMouse.cpp ./orbis-shims/ProsperoNotify.cpp \
   ./orbis-shims/ProsperoHTTPDownloader.cpp ./orbis-shims/ProsperoHTTPConsole.cpp ./orbis-shims/ProsperoAchievements.cpp \
   ./orbis-shims/ProsperoAchievementBrowser.cpp \
-  ./orbis-shims/orbis_gs_shaders.cpp
+  ./orbis-shims/orbis_gs_shaders.cpp \
+  ./orbis-shims/ps5_framegen.cpp
 
 SHIM_ASM := ./orbis-shims/ProsperoTLS.S
 
