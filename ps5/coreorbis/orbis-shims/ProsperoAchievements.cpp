@@ -1,5 +1,7 @@
 // Persistent RetroAchievements credentials and shelf login worker (AI-assisted).
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <cctype> // vk-285-134
+#include <cstdio>
 #include "ProsperoAchievements.h"
 #include "ProsperoNotify.h"
 #include "pcsx2/Achievements.h"
@@ -74,7 +76,29 @@ namespace
 			account.state.username = login->username;
 		}
 		// Do not publish arbitrary server responses containing a submitted credential.
-		account.state.message = success ? "" : "Login failed. Check your account, connection and writable storage.";
+		// vk-285-134 (AI-assisted): what kind of failure it was, from rcheevos' own error names (never the server's text):
+		// a tester in build 130's logs got eleven 401s and then a 429, and only saw "Login failed".
+		const std::string why = error.GetDescription();
+		const auto starts = [&why](const char* prefix) { return why.rfind(prefix, 0) == 0; };
+		std::string lower = why;
+		for (char& c : lower)
+			c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+		const char* message = "Login failed. Check your account, connection and writable storage.";
+		if (starts("Invalid credentials"))
+			message = "Wrong user name or password. Use your RetroAchievements user name (not your e-mail) and your password "
+					  "(not the Web API key).";
+		else if (lower.find("too many") != std::string::npos || lower.find("429") != std::string::npos)
+			message = "Too many sign-in tries. Wait a few minutes, then try again.";
+		else if (starts("Access denied") || starts("Expired token"))
+			message = "RetroAchievements refused this account. Check it on retroachievements.org (is the e-mail verified?).";
+		else if (starts("No response"))
+			message = "No answer from RetroAchievements. Check the console's connection.";
+		account.state.message = success ? "" : message;
+		if (!success)
+		{
+			std::printf("[achievements] sign-in failed: %s\n", starts("Invalid credentials") ? "invalid credentials" : message);
+			std::fflush(stdout);
+		}
 		return nullptr;
 	}
 

@@ -1534,9 +1534,12 @@ static void OrbisGLOSD(bool generated = false)
 		// line itself still prints after [perf].
 		const bool print = g_orbis_perf || g_orbis_test_build > 0; // eerec-280; test build 1: always in testing builds
 		OrbisMeasureLoad();
-		const float ee = s_orbis_load_valid ? s_orbis_load_ee : static_cast<float>(PerformanceMetrics::GetCPUThreadUsage());
-		const float gs = s_orbis_load_valid ? s_orbis_load_gs : PerformanceMetrics::GetGSThreadUsage();
-		const float vu = s_orbis_load_valid ? s_orbis_load_vu : PerformanceMetrics::GetVUThreadUsage();
+		// vk-285-134: each load kept to 0..100%: the [load] counters can come out negative or huge for a second (build
+		// 130's minute lines had "EE 57138930034%"), which spoiled the minute's average.
+		const auto load = [](float v) { return std::isfinite(v) ? std::clamp(v, 0.0f, 100.0f) : 0.0f; };
+		const float ee = load(s_orbis_load_valid ? s_orbis_load_ee : static_cast<float>(PerformanceMetrics::GetCPUThreadUsage()));
+		const float gs = load(s_orbis_load_valid ? s_orbis_load_gs : PerformanceMetrics::GetGSThreadUsage());
+		const float vu = load(s_orbis_load_valid ? s_orbis_load_vu : PerformanceMetrics::GetVUThreadUsage());
 		OrbisPerfMinute(s_fps, PerformanceMetrics::GetSpeed(), ee, gs, vu); // test build 1
 		OrbisAutoProfSecond(PerformanceMetrics::GetSpeed(), ee, gs, vu); // vk-285-118: a slow stretch samples the busy thread
 		OrbisReadbackAutoSecond(PerformanceMetrics::GetSpeed(), s_fps); // vk-285-118: older firmware's readback stall

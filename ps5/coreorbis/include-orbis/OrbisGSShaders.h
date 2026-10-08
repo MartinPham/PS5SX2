@@ -15,6 +15,6 @@
 // The built-in copy of resources/<filename> ("shaders/vulkan/tfx.glsl"); false for a name it doesn't carry.
 bool OrbisBuiltinShaderSource(const char* filename, std::string* out);
 
-// resources/<filename> from the folder, else the built-in copy (with a boot.log line the first time a file comes
-// from the eboot); false when neither has it.
+// The built-in copy of resources/<filename>, else the folder's (vk-285-134: the eboot's first, a boot.log line when the
+// folder holds a different copy; shadeboost.glsl, meant to be edited, the folder's first); false when neither has it.
 bool OrbisReadShaderSource(const std::string& resources_dir, const char* filename, std::string* out);

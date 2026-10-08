@@ -321,13 +321,25 @@ std::string OrbisFindBiosElsewhere(std::string* seen)
 {
 	std::vector<std::string> dirs;
 	const std::string& bios = EmuFolders::Bios;
-	int subs = 0;
-	for (const std::string& name : OrbisNames(bios))
+	// vk-285-134 (AI-assisted): the BIOS folder's folders three levels down (64 at most), not one: build 130's logs had
+	// BIOS packs unpacked as folders of folders ("ps2 bios usa/", "SCPH-30003_BIOS_V3_UK_120_(PAL)/", ...).
 	{
-		if (subs < 16 && OrbisIsDir(bios + "/" + name))
+		std::vector<std::pair<std::string, int>> todo = {{bios, 0}};
+		for (size_t i = 0; i < todo.size() && dirs.size() < 64; i++)
 		{
-			dirs.push_back(bios + "/" + name);
-			subs++;
+			const auto [dir, depth] = todo[i];
+			if (depth >= 3)
+				continue;
+			for (const std::string& name : OrbisNames(dir))
+			{
+				if (dirs.size() >= 64)
+					break;
+				if (OrbisIsDir(dir + "/" + name))
+				{
+					dirs.push_back(dir + "/" + name);
+					todo.emplace_back(dir + "/" + name, depth + 1);
+				}
+			}
 		}
 	}
 	const std::string top = "/data/PCSX2";

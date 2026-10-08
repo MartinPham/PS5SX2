@@ -31,6 +31,8 @@
 #ifdef ORBIS_VULKAN
 #include "../frontend/fe_ps5.h"
 #include "../frontend/fe_i18n.h" // vk-285-110: the notifications' text
+#include "../frontend/fe_bios.h" // vk-285-134: the BIOS before the shelf
+#include "ps2/BiosTools.h"       // vk-285-134: IsBIOS, IsBIOSAvailable
 #endif // vk-285-36/38: [vkwait], [shaders]
 extern volatile unsigned long long g_orbis_map_addr;
 #include "vtlb.h"
@@ -61,6 +63,7 @@ extern volatile unsigned long long g_orbis_map_addr;
 #include "orbis-shims/ProsperoKbdMouse.h" // vk-285-72, vk-285-113: the PS5's USB keyboard and mouse
 #include "orbis-shims/OrbisPadMap.h"     // vk-285-116: the controller remapping
 #include <mutex>
+#include <set> // vk-285-134
 // vk-285-108 (GSRenderer.cpp): the helper threads' CPUs and the ticker's heartbeat for the GS thread's watchdog.
 void OrbisHelperThreadAdd(pthread_t thread);
 extern "C" const int orbis_ps5vk_war_shim __attribute__((weak)); // vk-285-119 (orbis-shims/orbis_ps5vk_war.c)
@@ -1932,9 +1935,64 @@ static std::string orbis_report_header()
 }
 
 // The frontend's folders (vk-285-44: used twice, for the cover prefetch and for the shelf).
+// vk-285-134 (AI-assisted): the BIOS before the shelf (build 130's logs: 961 starts on 235 consoles without one). When PCSX2
+// finds none, a BIOS in a .zip/.rar/.7z in the BIOS folder, /data/PCSX2 or a drive is taken out into the BIOS folder; when
+// there's still none, s_bios_problem says what was found instead, and the shelf shows it and won't start a game.
+static std::string s_bios_problem;
+static std::set<std::string> s_bios_archives_tried;
+static bool orbis_is_bios(const std::string& path)
+{
+  u32 version = 0, region = 0;
+  std::string description, zone;
+  return IsBIOS(path.c_str(), version, description, region, zone);
+}
+static std::vector<std::string> orbis_bios_places()
+{
+  std::vector<std::string> dirs = {EmuFolders::Bios};
+  if (EmuFolders::Bios != "/data/PCSX2")
+    dirs.push_back("/data/PCSX2");
+  for (int i = 0; i < 10; i++)
+  {
+    const std::string root = i < 8 ? "/mnt/usb" + std::to_string(i) : "/mnt/ext" + std::to_string(i - 8);
+    struct stat st = {};
+    if (stat(root.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+      dirs.push_back(root);
+  }
+  return dirs;
+}
+static bool orbis_check_bios()
+{
+  if (IsBIOSAvailable(std::string()))
+  {
+    s_bios_problem.clear();
+    return true;
+  }
+  std::string from;
+  const std::string taken = fe::ExtractBiosFromArchives(orbis_bios_places(), EmuFolders::Bios, orbis_is_bios,
+    &s_bios_archives_tried, &from);
+  if (!taken.empty())
+  {
+    printf("[bios] %s taken out of %s\n", taken.c_str(), from.c_str());
+    fflush(stdout);
+    if (IsBIOSAvailable(std::string()))
+    {
+      s_bios_problem.clear();
+      return true;
+    }
+  }
+  s_bios_problem = fe::DescribeBiosProblem(EmuFolders::Bios, "/data/PCSX2", orbis_bios_places(), orbis_is_bios);
+  printf("[bios] no PS2 BIOS: %s\n", s_bios_problem.c_str());
+  fflush(stdout);
+  return false;
+}
+
 static OrbisFrontendPaths orbis_frontend_paths(bool allow_download)
 {
   OrbisFrontendPaths fe;
+  // vk-285-134: the BIOS, for the shelf's line and its check at each start.
+  fe.bios_check = []() { return orbis_check_bios(); };
+  fe.bios_dir = EmuFolders::Bios == "/data/PCSX2" ? "/data/PCSX2/bios" : EmuFolders::Bios;
+  fe.bios_problem = [](){ return s_bios_problem; };
   // Test build 1 (vk-285-55): USB drives, the testing label and the logs download.
   fe.usb_dirs = s_usb_dirs;
   fe.usb_list = OrbisDir("cache") + "/usb-games.txt";
@@ -2176,6 +2234,47 @@ static void orbis_set_aside_shader_caches()
 // 60 Hz. PS5VK_PARAM_JSON names the first of these that opens instead: the running app's own folder as the sandbox mounts it
 // (what the system sees), /app0, then the install folder. What it declares is logged here, since the driver's own lines go to
 // stderr.log.
+// vk-285-134 (AI-assisted): build 130's logs had ~27 starts that failed with "Requested filename '...' does not exist" for a
+// file the shelf had just listed (and the same game started before and after on the same console, from internal storage and
+// USB drives alike). Before the VM looks, the file is stat'ed here: when it isn't seen, up to 3 s of retries, and boot.log
+// gets errno, whether its folder opens and whether a file of that name is in it.
+static void orbis_wait_for_game_file(const std::string& path)
+{
+  if (path.empty() || path[0] != '/')
+    return;
+  struct stat st = {};
+  if (stat(path.c_str(), &st) == 0)
+    return;
+  const int first = errno;
+  const size_t slash = path.find_last_of('/');
+  const std::string dir = slash == 0 ? "/" : path.substr(0, slash), name = path.substr(slash + 1);
+  bool listed = false;
+  int dir_errno = 0;
+  if (DIR* d = opendir(dir.c_str()))
+  {
+    while (const dirent* e = readdir(d))
+      listed |= name == e->d_name;
+    closedir(d);
+  }
+  else
+    dir_errno = errno;
+  printf("[boot] game file not seen: stat errno %d; its folder %s %s%s; retrying for up to 3 s\n", first, dir.c_str(),
+    dir_errno ? "doesn't open, errno " : "opens", dir_errno ? std::to_string(dir_errno).c_str() : (listed ? ", the name is in it" : ", the name isn't in it"));
+  fflush(stdout);
+  for (int i = 1; i <= 15; i++)
+  {
+    usleep(200000);
+    if (stat(path.c_str(), &st) == 0)
+    {
+      printf("[boot] game file seen after %d ms\n", i * 200);
+      fflush(stdout);
+      return;
+    }
+  }
+  printf("[boot] game file still not seen (errno %d)\n", errno);
+  fflush(stdout);
+}
+
 static void orbis_vk_param_json()
 {
   static const char* const paths[] = {"/mnt/sandbox/PPSA99203_000/app0/sce_sys/param.json", "/app0/sce_sys/param.json",
@@ -2607,6 +2706,7 @@ int main()
   // vk-285-50: the settings page (frontend/fe_web.cpp) for phones and PCs, before the shelf that
   // shows its QR code; it keeps running in the game. The nowebui flag leaves it off.
   orbis_scan_usb("after the jailbreak"); // test build 1: games on USB drives
+  orbis_check_bios(); // vk-285-134: after the drives are seen, before the shelf
   orbis_boot_log_release("before the settings page starts"); // vk-285-113: still holding? (the folder can show up late)
   if (!orbis_flag("nowebui"))
     orbis_web_start(orbis_frontend_paths(false), orbis_build_label().c_str());
@@ -3064,6 +3164,7 @@ int main()
   SysMemory::Reset();
   printf("[boot] SysMemory::Reset done\n");
   fflush(stdout);
+  orbis_wait_for_game_file(params.filename); // vk-285-134
   const VMBootResult res = VMManager::Initialize(params, &err);
   init_done = true;
   printf("[boot] Initialize=%d err=%s\n", (int)res, err.GetDescription().c_str());

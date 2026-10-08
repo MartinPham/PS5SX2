@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,12 @@ struct OrbisFrontendPaths
 	std::string cheats_dir;
 	std::string online_patch_manifest;
 	bool online_patches = true;
+	// vk-285-134 (AI-assisted): the PS2 BIOS (build 130's logs: 961 starts on 235 consoles without one). bios_check looks
+	// again (a BIOS in an archive is taken out) and says whether PCSX2 finds one; bios_problem is then what was found
+	// instead (a sentence); bios_dir where the BIOS goes. Unset: the shelf doesn't check.
+	std::function<bool()> bios_check;
+	std::function<std::string()> bios_problem;
+	std::string bios_dir;
 };
 
 // 2026-10-08 (AI-assisted): what orbis_frontend_run returns for the sheet's "PS2 system menu": main-boot.cpp then boots the

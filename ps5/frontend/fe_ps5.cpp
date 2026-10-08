@@ -1632,6 +1632,11 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 			const std::string what = DescribeImage(g.path);
 			if (!what.empty())
 				std::printf("[frontend]   chd: %s\n", what.c_str());
+			// vk-285-134: libchdr's "invalid file/data" (or a version it doesn't read) is a damaged image; a CHD that needs
+			// its parent isn't (PCSX2 finds the parent itself).
+			const std::string cant = "libchdr can't open it: ";
+			if (what.rfind(cant, 0) == 0 && what.find("parent") == std::string::npos)
+				g.damaged = what.substr(cant.size());
 		}
 	}
 	SortGames(games); // vk-285-113: by the titles the game database may have changed
@@ -1807,6 +1812,9 @@ std::string orbis_frontend_run(const OrbisFrontendPaths& paths, const char* buil
 		acfg.options.cheats_dir = paths.cheats_dir;
 	}
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games offers the PS2 system menu (main-boot.cpp boots it)
+	acfg.bios_present = paths.bios_check; // vk-285-134
+	acfg.bios_problem = paths.bios_problem;
+	acfg.bios_dir = paths.bios_dir;
 	bool ok = app.Init(&renderer, fonts, games, covers, acfg);
 	std::printf("[frontend] up in %.0f ms (%s)\n", (Now() - t0) * 1000.0, ok ? "ok" : renderer.error().c_str());
 	std::fflush(stdout);

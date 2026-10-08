@@ -25,6 +25,9 @@ struct GameInfo
 	std::string serial; // "SLUS-21351" (empty when the disc could not be read)
 	uint64_t bytes = 0;
 	std::vector<std::string> badges; // "6x", "16:9", "60 FPS"
+	// vk-285-134 (AI-assisted): why the image can't be read ("invalid data": a CHD libchdr can't open, damaged or cut short;
+	// build 130's logs: 10 such starts on 4 consoles); empty when it reads. The shelf marks it and won't start it.
+	std::string damaged;
 };
 
 // A disc image's file name: .iso, (vk-285-108) .chd, (vk-285-113) .cso or .zso, (2026-10-08) .bin or .img, in any case,

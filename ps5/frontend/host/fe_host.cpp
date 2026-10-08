@@ -3,6 +3,7 @@
 // writes the frames it is told to as PNG files. Nothing of this goes into the eboot.
 //
 //   build-host.sh && ./fe_host --data <folder> --out <folder> [--size 1920x1080] [--lang <ps5 language id>] [--ime]
+//   [--no-bios "<what was found instead>"] (vk-285-134)
 //                               [--script <file>] [step ...]
 //
 // <folder> for --data is a stand-in for /data/PCSX2: settings/, gs.ini, patches/, memcards/ (made when missing).
@@ -327,6 +328,8 @@ int main(int argc, char** argv)
 		root = (slash == std::string::npos ? std::string(".") : self.substr(0, slash)) + "/..";
 	}
 	std::string web;
+	bool no_bios = false; // vk-285-134
+	std::string no_bios_problem;
 	for (int i = 1; i < argc; i++)
 	{
 		const std::string a = argv[i];
@@ -353,6 +356,11 @@ int main(int argc, char** argv)
 			texpacks_rate = std::atof(next().c_str());
 		else if (a == "--texpacks-fake")
 			texpacks_fake = true;
+		else if (a == "--no-bios") // vk-285-134: no PS2 BIOS, and what was found instead (the shelf's line, picks refused)
+		{
+			no_bios = true;
+			no_bios_problem = next();
+		}
 		else if (a == "--size")
 		{
 			const std::string s = next();
@@ -534,6 +542,12 @@ int main(int argc, char** argv)
 	acfg.build_tag = "vk-285-114 (host)";
 	acfg.options = op;
 	acfg.system_menu = true; // 2026-10-08: the sheet for all games' "PS2 system menu" row
+	if (no_bios)
+	{
+		acfg.bios_present = [] { return false; };
+		acfg.bios_problem = [no_bios_problem] { return no_bios_problem; };
+		acfg.bios_dir = "/data/PCSX2/bios";
+	}
 	acfg.refresh_game = [op](GameInfo& g) {
 		g.badges.clear();
 		ReadBadges(g, op.settings_dir, op.gs_ini, op.patches_dir);

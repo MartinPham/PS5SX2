@@ -119,6 +119,7 @@ enum class Str : int
 	RaServerError,      // "RetroAchievements: server error" (the toast's title; the server's own message under it)
 	RaUnreachable,      // "Couldn't reach RetroAchievements. You're still signed in: ..." (the token sign-in at a game's start)
 	RaUnsent,           // "An unlock couldn't be sent to RetroAchievements before closing ..." (back to the shelf, offline)
+	ShelfNoBios,        // vk-285-134: "No PS2 BIOS found: games can't start. Copy your BIOS file ... to %s" (the shelf's line)
 	Count
 };
 

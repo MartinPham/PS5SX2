@@ -69,6 +69,8 @@ Vec2 Project(const Mat4& view_proj, const Vec3& p)
 	out.y = (c.y / c.w) * 0.5f + 0.5f;
 	return out;
 }
+
+std::string Fit(const Fonts& fonts, std::string text, float px, float width); // below; vk-285-134: Build uses it too
 } // namespace
 
 bool App::Init(Renderer* renderer, const Fonts* fonts, std::vector<GameInfo> games, CoverService* covers, const AppConfig& cfg)
@@ -88,8 +90,33 @@ bool App::Init(Renderer* renderer, const Fonts* fonts, std::vector<GameInfo> gam
 	m_renderer->SetAtlas(m_atlas);
 	if (m_covers)
 		m_covers->SetSelected(m_selected);
+	// vk-285-134: main-boot.cpp looked for the BIOS just before the shelf; what it found is shown until a pick looks again.
+	m_bios_problem = m_cfg.bios_problem ? m_cfg.bios_problem() : std::string();
+	m_bios_missing = !m_bios_problem.empty();
 	return true;
 }
+
+// vk-285-134 (AI-assisted): a game (or the PS2 system menu) starts only with a BIOS. Looked for again at each pick, as a BIOS
+// may have been copied over meanwhile (the settings page, FTP); without one the pick stays on the shelf and the line says why.
+bool App::BiosReady()
+{
+	if (!m_cfg.bios_present)
+		return true;
+	if (m_cfg.bios_present())
+	{
+		m_bios_missing = false;
+		m_bios_problem.clear();
+		return true;
+	}
+	m_bios_missing = true;
+	m_bios_problem = m_cfg.bios_problem ? m_cfg.bios_problem() : std::string();
+	m_bios_refused = m_time;
+	std::printf("[frontend] no PS2 BIOS: the game stays on the shelf (%s)\n", m_bios_problem.c_str());
+	std::fflush(stdout);
+	Sound(Sfx::Edge, 0.0f);
+	return false;
+}
+
 
 void App::SetWebUrl(const std::string& url, const std::string& shown)
 {
@@ -306,11 +333,24 @@ void App::Update(double dt, const Input& in)
 				Sound(Step(5) ? Sfx::JumpRight : Sfx::Edge, 0.25f);
 			if (((in.cross && !m_prev.cross) || (in.options && !m_prev.options)) && !m_games.empty() && !m_qr_big)
 			{
-				if (m_cfg.game_achievements.cancel)
-					m_cfg.game_achievements.cancel();
-				m_launching = true;
-				m_launch_time = m_time;
-				Sound(Sfx::Launch, 0.0f);
+				const GameInfo& picked = m_games[static_cast<size_t>(m_selected)];
+				if (!picked.damaged.empty()) // vk-285-134: an image that can't be read stays on the shelf
+				{
+					m_refused_text = "This image can't be read (" + picked.damaged +
+					                 "): copy it again, or make the CHD again with chdman from a good copy.";
+					m_refused_time = m_time;
+					std::printf("[frontend] %s can't be read (%s): not started\n", picked.file.c_str(), picked.damaged.c_str());
+					std::fflush(stdout);
+					Sound(Sfx::Edge, 0.0f);
+				}
+				else if (BiosReady()) // vk-285-134
+				{
+					if (m_cfg.game_achievements.cancel)
+						m_cfg.game_achievements.cancel();
+					m_launching = true;
+					m_launch_time = m_time;
+					Sound(Sfx::Launch, 0.0f);
+				}
 			}
 			// Triangle keeps the upstream QR view; Circle opens the RA account (AI-assisted).
 			else if (m_qr_big && ((in.triangle && !m_prev.triangle) || (in.circle && !m_prev.circle)))
@@ -526,6 +566,7 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		m_fonts->AddText(ui, label.c_str(), margin, 290.0f * k, 34.0f * k, dim);
 	}
 	BuildTexturePackActivity(ui, margin, (m_cfg.achievements.state ? 350.0f : 290.0f) * k, k, accent); // 2026-10-05
+	BuildBiosLine(ui, W, k); // vk-285-134
 
 	// The settings page's QR tile, bottom right (vk-285-50). The code is dark on a light tile, as
 	// cameras expect; neighbouring dark modules are merged into runs and grown by a pixel so the
@@ -590,6 +631,8 @@ void App::Build(FrameDesc& f, const std::string& clock)
 		add(g.serial);
 		add(Region(g.region)); // vk-285-110: the region names in the PS5's language
 		add(SizeText(g.bytes));
+		if (!g.damaged.empty())
+			add("can't be read"); // vk-285-134
 		const float info_px = 44.0f * k, badge_px = 36.0f * k;
 		const float pad = 20.0f * k, gap = 16.0f * k;
 		float row_w = m_fonts->Measure(info.c_str(), info_px);
@@ -609,6 +652,13 @@ void App::Build(FrameDesc& f, const std::string& clock)
 	}
 	else
 		m_fonts->AddText(ui, Tr(Str::NoGames), W * 0.5f, H * 0.5f, 64.0f * k, white, 0.4f, Fonts::Center);
+	// vk-285-134: a pick refused for its image, for six seconds, just above the title.
+	if (!m_refused_text.empty() && m_time - m_refused_time < 6.0)
+	{
+		const float a = static_cast<float>(std::min(1.0, (6.0 - (m_time - m_refused_time)) / 0.5));
+		m_fonts->AddText(ui, Fit(*m_fonts, m_refused_text, 36.0f * k, W * 0.8f).c_str(), W * 0.5f, H * 0.775f, 36.0f * k,
+			Rgba(1.0f, 0.78f, 0.55f, a), 0.3f, Fonts::Center);
+	}
 	FadeRange(ui, title_begin, ui.size(), 1.0f - sheet_e); // vk-285-114: the sheet shows the title itself
 
 	// vk-285-114: the options sheet, over a dimmed shelf.
@@ -1153,10 +1203,13 @@ void App::UpdateSheet(double dt, const Input& in)
 			if (m_sheet.TakeSystemMenu())
 			{
 				CloseSheet();
-				m_system_menu = true;
-				m_launching = true;
-				m_launch_time = m_time;
-				Sound(Sfx::Launch, 0.0f);
+				if (BiosReady()) // vk-285-134: the PS2's own menu is the BIOS
+				{
+					m_system_menu = true;
+					m_launching = true;
+					m_launch_time = m_time;
+					Sound(Sfx::Launch, 0.0f);
+				}
 			}
 		}
 		return;
@@ -1381,6 +1434,25 @@ std::string App::TexturePackHelp(const TexturePackStatus& s, int pick, const std
 }
 
 // The shelf's line while a pack is on its way: "HD textures: God of War · 37%", and a thin bar under it.
+// vk-285-134: the line while there's no BIOS, centred under the clock's row: the headline in the PS5's language, what was
+// found instead under it. It lights up for a moment when a pick was refused.
+void App::BuildBiosLine(std::vector<UiVertex>& ui, float W, float k)
+{
+	if (!m_bios_missing)
+		return;
+	const float since = static_cast<float>(m_time - m_bios_refused);
+	const float flash = since >= 0.0f && since < 1.6f ? 1.0f - since / 1.6f : 0.0f;
+	const float w = 2000.0f * k, x = W * 0.5f - w * 0.5f, y = 222.0f * k, h = m_bios_problem.empty() ? 96.0f * k : 150.0f * k;
+	Fonts::AddRoundedRect(ui, x, y, w, h, 24.0f * k, Rgba(0.42f + 0.25f * flash, 0.20f + 0.08f * flash, 0.04f, 0.88f));
+	char head[320];
+	std::snprintf(head, sizeof(head), Tr(Str::ShelfNoBios), m_cfg.bios_dir.c_str());
+	const float hpx = 40.0f * k, dpx = 32.0f * k;
+	m_fonts->AddText(ui, Fit(*m_fonts, head, hpx, w - 60.0f * k).c_str(), W * 0.5f, y + 60.0f * k, hpx, Rgba(1, 1, 1), 0.4f, Fonts::Center);
+	if (!m_bios_problem.empty())
+		m_fonts->AddText(ui, Fit(*m_fonts, m_bios_problem, dpx, w - 60.0f * k).c_str(), W * 0.5f, y + 116.0f * k, dpx,
+			Rgba(1.0f, 0.86f, 0.62f), 0.2f, Fonts::Center);
+}
+
 void App::BuildTexturePackActivity(std::vector<UiVertex>& ui, float x, float y, float k, uint32_t accent)
 {
 	using State = TexturePackStatus::State;

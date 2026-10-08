@@ -50,6 +50,11 @@ struct AppConfig
 	TexturePackService texture_packs; // 2026-10-05: HD texture packs from archive.org (fe_texpacks.h); unset: no row
 	OnlinePatchService online_patches; // 2026-10-08: a game's patches and cheats from GitHub (fe_patchdl.h); unset: no row
 	bool system_menu = false; // 2026-10-08: the sheet for all games offers the PS2 system menu (App::SystemMenuChosen)
+	// vk-285-134 (AI-assisted): the PS2 BIOS. bios_present looks again and says whether there is one (null: never asked);
+	// while there isn't, the shelf says so (bios_problem: what was found instead) and a game picked stays on the shelf.
+	std::function<bool()> bios_present;
+	std::function<std::string()> bios_problem;
+	std::string bios_dir;
 };
 
 class App
@@ -176,6 +181,17 @@ private:
 	// 2026-10-08: the online patches' state last seen for the sheet's game (a finished fetch reloads the sheet's rows).
 	std::string m_online_seen_serial;
 	OnlinePatchStatus::State m_online_seen = OnlinePatchStatus::State::Idle;
+
+	// vk-285-134: no PS2 BIOS (AppConfig::bios_present said so at start or at the last pick), what was found instead,
+	// and when a pick was refused for it (the line lights up).
+	bool m_bios_missing = false;
+	std::string m_bios_problem;
+	double m_bios_refused = -10;
+	bool BiosReady(); // looks again; false (and the line lit) when there's still none
+	void BuildBiosLine(std::vector<UiVertex>& ui, float W, float k);
+	// vk-285-134: a pick refused for its image (GameInfo::damaged): the line under the title says why, for a few seconds.
+	std::string m_refused_text;
+	double m_refused_time = -10;
 
 	bool m_launching = false;
 	double m_launch_time = 0;

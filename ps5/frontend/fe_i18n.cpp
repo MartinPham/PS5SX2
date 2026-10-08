@@ -112,6 +112,7 @@ const char* const kKeys[kCount] = {
 	"achievements.server_error",
 	"achievements.unreachable",
 	"achievements.unsent",
+	"shelf.no_bios",
 };
 
 const char* const kEnglish[kCount] = {
@@ -209,6 +210,7 @@ const char* const kEnglish[kCount] = {
 	"RetroAchievements: server error",
 	"Couldn't reach RetroAchievements. You're still signed in: achievements come back with the next game.",
 	"An unlock couldn't be sent to RetroAchievements before closing (no connection). It won't be on your account.",
+	"No PS2 BIOS found: games can't start. Copy your BIOS file (4 MB, e.g. SCPH-70012.bin) to %s",
 };
 
 const char* const kSpanish[kCount] = {
@@ -306,6 +308,7 @@ const char* const kSpanish[kCount] = {
 	"RetroAchievements: error del servidor",
 	"No se pudo conectar con RetroAchievements. Sigues con la sesión iniciada: los logros volverán en el próximo juego.",
 	"No se pudo enviar un logro a RetroAchievements antes de cerrar (sin conexión). No aparecerá en tu cuenta.",
+	"No se encontró BIOS de PS2: los juegos no pueden iniciarse. Copia tu archivo de BIOS (4 MB, p. ej. SCPH-70012.bin) en %s",
 };
 
 const char* const kSpanishLatAm[kCount] = {
@@ -403,6 +406,7 @@ const char* const kSpanishLatAm[kCount] = {
 	"RetroAchievements: error del servidor",
 	"No se pudo conectar con RetroAchievements. Tu sesión sigue iniciada: los logros volverán en el próximo juego.",
 	"No se pudo enviar un logro a RetroAchievements antes de cerrar (sin conexión). No va a aparecer en tu cuenta.",
+	"No se encontró un BIOS de PS2: los juegos no pueden iniciar. Copia tu archivo de BIOS (4 MB, p. ej. SCPH-70012.bin) a %s",
 };
 
 const char* const kFrench[kCount] = {
@@ -500,6 +504,7 @@ const char* const kFrench[kCount] = {
 	"RetroAchievements : erreur du serveur",
 	"Impossible de joindre RetroAchievements. Tu restes connecté : les succès reviendront au prochain jeu.",
 	"Un succès n'a pas pu être envoyé à RetroAchievements avant la fermeture (pas de connexion). Il ne sera pas sur ton compte.",
+	"Aucun BIOS PS2 trouvé : les jeux ne peuvent pas démarrer. Copiez votre fichier BIOS (4 Mo, p. ex. SCPH-70012.bin) dans %s",
 };
 
 const char* const kGerman[kCount] = {
@@ -597,6 +602,7 @@ const char* const kGerman[kCount] = {
 	"RetroAchievements: Serverfehler",
 	"RetroAchievements ist nicht erreichbar. Du bleibst angemeldet: Die Erfolge sind beim nächsten Spiel wieder da.",
 	"Ein Erfolg konnte vor dem Schließen nicht an RetroAchievements gesendet werden (keine Verbindung). Er fehlt in deinem Konto.",
+	"Kein PS2-BIOS gefunden: Spiele können nicht starten. Kopiere deine BIOS-Datei (4 MB, z. B. SCPH-70012.bin) nach %s",
 };
 
 const char* const kItalian[kCount] = {
@@ -694,6 +700,7 @@ const char* const kItalian[kCount] = {
 	"RetroAchievements: errore del server",
 	"Impossibile raggiungere RetroAchievements. Resti connesso: gli obiettivi torneranno con il prossimo gioco.",
 	"Un obiettivo non è stato inviato a RetroAchievements prima della chiusura (nessuna connessione). Non comparirà sul tuo account.",
+	"Nessun BIOS PS2 trovato: i giochi non possono avviarsi. Copia il tuo file BIOS (4 MB, es. SCPH-70012.bin) in %s",
 };
 
 const char* const kDutch[kCount] = {
@@ -791,6 +798,7 @@ const char* const kDutch[kCount] = {
 	"RetroAchievements: serverfout",
 	"RetroAchievements is niet bereikbaar. Je blijft aangemeld: de prestaties zijn er bij het volgende spel weer.",
 	"Een prestatie kon voor het afsluiten niet naar RetroAchievements worden verstuurd (geen verbinding). Ze staat niet op je account.",
+	"Geen PS2-BIOS gevonden: games kunnen niet starten. Kopieer je BIOS-bestand (4 MB, bijv. SCPH-70012.bin) naar %s",
 };
 
 const char* const kPortuguese[kCount] = {
@@ -888,6 +896,7 @@ const char* const kPortuguese[kCount] = {
 	"RetroAchievements: erro do servidor",
 	"Não foi possível contactar o RetroAchievements. Continuas com a sessão iniciada: as conquistas voltam no próximo jogo.",
 	"Não foi possível enviar uma conquista ao RetroAchievements antes de fechar (sem ligação). Não vai aparecer na tua conta.",
+	"Nenhuma BIOS da PS2 encontrada: os jogos não podem arrancar. Copie o seu ficheiro de BIOS (4 MB, p. ex. SCPH-70012.bin) para %s",
 };
 
 const char* const kPortugueseBrazil[kCount] = {
@@ -985,6 +994,7 @@ const char* const kPortugueseBrazil[kCount] = {
 	"RetroAchievements: erro do servidor",
 	"Não foi possível acessar o RetroAchievements. Você continua conectado: as conquistas voltam no próximo jogo.",
 	"Não foi possível enviar uma conquista ao RetroAchievements antes de fechar (sem conexão). Ela não vai aparecer na sua conta.",
+	"Nenhuma BIOS do PS2 encontrada: os jogos não podem iniciar. Copie seu arquivo de BIOS (4 MB, ex.: SCPH-70012.bin) para %s",
 };
 
 // The region names fe_games.cpp takes from a file name's first group (kRegions there), in its order.
