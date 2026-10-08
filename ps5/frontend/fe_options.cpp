@@ -295,8 +295,9 @@ const std::vector<OptionGroup>& OptionGroups()
 	static const std::vector<OptionGroup> groups = {
 		{"Display",
 			{
-				Seg("upscale_multiplier", "Resolution", "1", "%", {{"1", "1x"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {"5", "5x"}, {"6", "6x"}},
-					"Internal resolution. 6x is about 4K."),
+				Seg("upscale_multiplier", "Resolution", "1", "%", {{"1", "1x"}, {"2", "2x"}, {"3", "3x"}, {"4", "4x"}, {"5", "5x"}, {"6", "6x"},
+										   {"8", "8x"}},
+					"Internal resolution. 6x is about 4K; 8x draws more than the screen shows (about 5K, made smaller to fit): sharpest, and the heaviest on the GPU."),
 				Seg("AspectRatio", "Aspect ratio", "Auto 4:3/3:2", "Aspect %",
 					{{"Auto 4:3/3:2", "Auto"}, {"4:3", "4:3"}, {"16:9", "16:9"}, {"Stretch", "Stretch"}}),
 				Toggle("EmuCore/EnableWideScreenPatches", "Widescreen patches", "false", "Widescreen %",

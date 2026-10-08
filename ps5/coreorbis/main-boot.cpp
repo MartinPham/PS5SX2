@@ -2359,7 +2359,10 @@ static void orbis_vk_environment()
   // 3x and 6x ("4K") needs 7680.
   // vk-285-66: 16384 with the flag file vk_16k, so PCSX2 offers 8x (16384 / 1280 = 12.8; at 8192 it
   // stops at 6x). The descriptor and target size fields hold 14 bits (the driver's ps5vk_max_extent_2d).
-  if (hw) setenv("PS5VK_MAX_EXTENT_2D", orbis_flag("vk_16k") ? "16384" : "8192", 0);
+  // vk-285-134d (Spyros: "also have a selectable option for 8x native"): 16384 by default, so the Resolution row's 8x
+  // applies (vk-285-66 ran R&C at 8x and 60 fps with it, and the 12 GiB heap it wants is the default since); the flag
+  // file vk_8k keeps 8192 (PCSX2 then stops at 6x).
+  if (hw) setenv("PS5VK_MAX_EXTENT_2D", orbis_flag("vk_8k") ? "8192" : "16384", 0);
   // vk-285-66: VkDeviceMemory outside the 4 GiB window and a 12 GiB heap (Mihawk's R86-R88) with the
   // flag file vk_widemem.
   if (hw && orbis_flag("vk_widemem")) setenv("PS5VK_WIDE_MEMORY", "1", 0);

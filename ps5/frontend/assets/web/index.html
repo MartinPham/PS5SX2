@@ -306,8 +306,8 @@ const combo = (key, label, def, pair) => ({ key: "PS5SX2/" + key, label, type: "
 const GROUPS = [
   { title: "Display", items: [
     { key: "upscale_multiplier", label: "Resolution", type: "seg", def: "1", short: "%",
-      options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"]],
-      hint: "Internal resolution. 6x is about 4K." },
+      options: [["1","1x"],["2","2x"],["3","3x"],["4","4x"],["5","5x"],["6","6x"],["8","8x"]],
+      hint: "Internal resolution. 6x is about 4K; 8x draws more than the screen shows (about 5K, made smaller to fit): sharpest, and the heaviest on the GPU." },
     { key: "AspectRatio", label: "Aspect ratio", type: "seg", def: "Auto 4:3/3:2", short: "Aspect %",
       options: [["Auto 4:3/3:2","Auto"],["4:3","4:3"],["16:9","16:9"],["Stretch","Stretch"]] },
     { key: "EmuCore/EnableWideScreenPatches", label: "Widescreen patches", type: "toggle", def: "false", short: "Widescreen %",
